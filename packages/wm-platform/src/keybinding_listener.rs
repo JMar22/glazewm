@@ -1,5 +1,5 @@
 use std::{
-  collections::HashMap,
+  collections::{HashMap, HashSet},
   sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
@@ -32,6 +32,39 @@ const MODIFIER_GROUPS: &[(Key, &[Key])] = &[
     ],
   ),
 ];
+
+/// Trigger keys whose keypress was intercepted by a keybinding.
+///
+/// Their matching release must also be intercepted so it cannot leak into
+/// a window focused by the keybinding action.
+#[derive(Debug, Default)]
+struct InterceptedKeypresses(Mutex<HashSet<Key>>);
+
+impl InterceptedKeypresses {
+  /// Records a trigger key whose keypress was intercepted.
+  fn record(&self, key: Key) {
+    let Ok(mut keys) = self.0.lock() else {
+      tracing::error!("Failed to acquire lock on intercepted keypresses.");
+      return;
+    };
+
+    keys.insert(key);
+  }
+
+  /// Returns whether a key release belongs to an intercepted keypress.
+  fn intercept_release(&self, key: Key, is_keypress: bool) -> bool {
+    if is_keypress {
+      return false;
+    }
+
+    let Ok(mut keys) = self.0.lock() else {
+      tracing::error!("Failed to acquire lock on intercepted keypresses.");
+      return false;
+    };
+
+    keys.remove(&key)
+  }
+}
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Keybinding(Vec<Key>);
@@ -148,8 +181,16 @@ impl KeybindingListener {
     event_tx: mpsc::UnboundedSender<KeybindingEvent>,
     dispatcher: &Dispatcher,
   ) -> crate::Result<platform_impl::KeyboardHook> {
+    let intercepted_keypresses = InterceptedKeypresses::default();
+
     platform_impl::KeyboardHook::new(
       move |event: platform_impl::KeyEvent| -> bool {
+        if intercepted_keypresses
+          .intercept_release(event.key, event.is_keypress)
+        {
+          return true;
+        }
+
         if !enabled.load(Ordering::Relaxed) || !event.is_keypress {
           return false;
         }
@@ -210,6 +251,7 @@ impl KeybindingListener {
         }
 
         let _ = event_tx.send(KeybindingEvent(longest_keybinding.clone()));
+        intercepted_keypresses.record(event.key);
 
         true
       },
@@ -237,5 +279,32 @@ impl KeybindingListener {
 impl Drop for KeybindingListener {
   fn drop(&mut self) {
     let _ = self.terminate();
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::InterceptedKeypresses;
+  use crate::Key;
+
+  #[test]
+  fn intercepts_release_after_intercepted_keypress() {
+    let intercepted_keypresses = InterceptedKeypresses::default();
+
+    intercepted_keypresses.record(Key::H);
+
+    assert!(!intercepted_keypresses.intercept_release(Key::H, true));
+    assert!(intercepted_keypresses.intercept_release(Key::H, false));
+    assert!(!intercepted_keypresses.intercept_release(Key::H, false));
+  }
+
+  #[test]
+  fn does_not_intercept_unrelated_key_release() {
+    let intercepted_keypresses = InterceptedKeypresses::default();
+
+    intercepted_keypresses.record(Key::H);
+
+    assert!(!intercepted_keypresses.intercept_release(Key::J, false));
+    assert!(intercepted_keypresses.intercept_release(Key::H, false));
   }
 }
