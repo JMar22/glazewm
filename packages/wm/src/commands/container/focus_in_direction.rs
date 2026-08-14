@@ -2,7 +2,9 @@ use anyhow::Context;
 use wm_common::{TilingDirection, WindowState};
 use wm_platform::Direction;
 
-use super::set_focused_descendant;
+use super::{
+  set_focused_descendant, window_cycle_target, FocusCycleDirection,
+};
 use crate::{
   models::{Container, TilingContainer},
   traits::{CommonGetters, TilingDirectionGetters, WindowGetters},
@@ -29,7 +31,22 @@ pub fn focus_in_direction(
           floating_focus_target(origin_container, direction)
         }
         WindowState::Fullscreen(_) => {
-          workspace_focus_target(origin_container, direction, state)?
+          let cycle_direction = match direction {
+            Direction::Left | Direction::Up => {
+              FocusCycleDirection::Previous
+            }
+            Direction::Right | Direction::Down => {
+              FocusCycleDirection::Next
+            }
+          };
+
+          window_cycle_target(origin_container, cycle_direction)
+            .map_or_else(
+              || {
+                workspace_focus_target(origin_container, direction, state)
+              },
+              |container| Ok(Some(container)),
+            )?
         }
         _ => None,
       }

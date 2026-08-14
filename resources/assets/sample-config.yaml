@@ -175,7 +175,8 @@ binding_modes:
         bindings: ['escape', 'enter', 'alt+r']
 
 keybindings:
-  # Shift focus in a given direction.
+  # Shift focus in a given direction. For fullscreen windows, left/up cycle
+  # to the previous fullscreen window and right/down cycle to the next.
   - commands: ['focus --direction left']
     bindings: ['alt+h', 'alt+left']
   - commands: ['focus --direction right']

@@ -366,6 +366,31 @@ You can create custom layouts by changing the tiling direction with `alt+v`. Thi
 
 Community-made scripts like [Dutch-Raptor/GAT-GWM](https://github.com/Dutch-Raptor/GAT-GWM) and [burgr033/GlazeWM-autotiling-python](https://github.com/burgr033/GlazeWM-autotiling-python) can be used to automatically change the tiling direction. Native support for automatic layouts isn't _currently_ supported.
 
+**Q: How can I use a fullscreen workflow similar to a monocle layout?**
+
+Use a catch-all window rule to open managed windows as fullscreen:
+
+```yaml
+window_rules:
+  - commands: ["set-fullscreen"]
+    match:
+      - window_process: { regex: ".*" }
+```
+
+Place this rule after any existing `ignore` rules so bars, widgets, and other intentionally unmanaged windows stay unaffected. Fullscreen windows remain independent rather than being grouped into a stack.
+
+When multiple fullscreen windows are open in the same workspace, directional focus cycles through them. Left/up focus the previous fullscreen window, while right/down focus the next. The default `alt+hjkl` bindings therefore work without any additional config.
+
+You can also bind linear window cycling explicitly. These commands cycle through windows with the same state as the focused window:
+
+```yaml
+keybindings:
+  - commands: ["focus --prev-window"]
+    bindings: ["alt+h", "alt+k"]
+  - commands: ["focus --next-window"]
+    bindings: ["alt+j", "alt+l"]
+```
+
 **Q: How do I create a rule for `<insert application>`?**
 
 To match a specific application, you need a command to execute and either the window's process name, title, or class name. For example, if you use Flow-Launcher and want to make the settings window float, you can do the following:
