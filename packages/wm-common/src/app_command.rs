@@ -312,6 +312,15 @@ pub struct InvokeFocusCommand {
   #[clap(long)]
   pub direction: Option<Direction>,
 
+  /// Focus the next window with the same state in the current workspace.
+  #[clap(long)]
+  pub next_window: bool,
+
+  /// Focus the previous window with the same state in the current
+  /// workspace.
+  #[clap(long)]
+  pub prev_window: bool,
+
   #[clap(long)]
   pub container_id: Option<Uuid>,
 

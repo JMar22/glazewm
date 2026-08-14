@@ -17,8 +17,8 @@ use wm_platform::{
 use crate::{
   commands::{
     container::{
-      focus_container_by_id, focus_in_direction, set_tiling_direction,
-      toggle_tiling_direction,
+      focus_container_by_id, focus_in_direction, focus_window_in_cycle,
+      set_tiling_direction, toggle_tiling_direction, FocusCycleDirection,
     },
     general::{
       cycle_focus, disable_binding_mode, enable_binding_mode,
@@ -266,6 +266,22 @@ impl WindowManager {
       InvokeCommand::Focus(args) => {
         if let Some(direction) = &args.direction {
           focus_in_direction(&subject_container, direction, state)?;
+        }
+
+        if args.next_window {
+          focus_window_in_cycle(
+            &subject_container,
+            FocusCycleDirection::Next,
+            state,
+          );
+        }
+
+        if args.prev_window {
+          focus_window_in_cycle(
+            &subject_container,
+            FocusCycleDirection::Previous,
+            state,
+          );
         }
 
         if let Some(direction) = &args.workspace_in_direction {
