@@ -69,12 +69,17 @@ impl Default for GapsConfig {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default, rename_all(serialize = "camelCase"))]
+#[allow(clippy::struct_excessive_bools)]
 pub struct GeneralConfig {
   /// Config for automatically moving the cursor.
   pub cursor_jump: CursorJumpConfig,
 
   /// Whether to automatically focus windows underneath the cursor.
   pub focus_follows_cursor: bool,
+
+  /// Whether to restore the WM's focused window after focus lands on a
+  /// Windows shell surface such as the desktop or taskbar.
+  pub restore_focus_on_shell: bool,
 
   /// Whether to switch back and forth between the previously focused
   /// workspace when focusing the current workspace.
@@ -103,6 +108,7 @@ impl Default for GeneralConfig {
     GeneralConfig {
       cursor_jump: CursorJumpConfig::default(),
       focus_follows_cursor: false,
+      restore_focus_on_shell: false,
       toggle_workspace_on_refocus: true,
       startup_commands: vec![],
       shutdown_commands: vec![],

@@ -2,6 +2,8 @@ use anyhow::Context;
 use tracing::info;
 use wm_common::{DisplayState, WindowRuleEvent, WmEvent};
 use wm_platform::NativeWindow;
+#[cfg(target_os = "windows")]
+use wm_platform::NativeWindowWindowsExt;
 
 use crate::{
   commands::{
@@ -38,6 +40,19 @@ pub fn handle_window_focused(
   // focus target and then to the WM's focus target.
   if should_override_focus(state) {
     state.pending_sync.queue_focus_change();
+    return Ok(());
+  }
+
+  // Windows can occasionally leave keyboard focus on the desktop or
+  // taskbar even though the WM's focused window is still visible. Restore
+  // that window after a short grace period. The delayed check avoids
+  // fighting taskbar app activation, Start, dialogs, and other real
+  // windows that legitimately take focus.
+  #[cfg(target_os = "windows")]
+  if config.value.general.restore_focus_on_shell
+    && should_restore_shell_focus(native_window, &focused_container, state)
+  {
+    schedule_shell_focus_restore(&focused_container, state);
     return Ok(());
   }
 
@@ -111,4 +126,93 @@ fn should_override_focus(state: &WmState) -> bool {
     .is_some_and(|time| time.elapsed().as_millis() < 100);
 
   has_recent_unmanage && !state.is_focus_synced
+}
+
+#[cfg(target_os = "windows")]
+const SHELL_FOCUS_RESTORE_DELAY_MS: u64 = 150;
+
+#[cfg(target_os = "windows")]
+fn should_restore_shell_focus(
+  native_window: &NativeWindow,
+  focused_container: &crate::models::Container,
+  state: &WmState,
+) -> bool {
+  if state.is_paused || !is_shell_focus_target(native_window) {
+    return false;
+  }
+
+  focused_container.as_window_container().is_ok_and(|window| {
+    matches!(
+      window.display_state(),
+      DisplayState::Shown | DisplayState::Showing
+    ) && window.native().is_visible().unwrap_or(false)
+      && !window.native().is_minimized().unwrap_or(true)
+  })
+}
+
+#[cfg(target_os = "windows")]
+fn schedule_shell_focus_restore(
+  focused_container: &crate::models::Container,
+  state: &WmState,
+) {
+  let Ok(window) = focused_container.as_window_container() else {
+    return;
+  };
+
+  let target = window.native().clone();
+  let dispatcher = state.dispatcher.clone();
+
+  tokio::task::spawn(async move {
+    tokio::time::sleep(std::time::Duration::from_millis(
+      SHELL_FOCUS_RESTORE_DELAY_MS,
+    ))
+    .await;
+
+    let Ok(current) = dispatcher.focused_window() else {
+      return;
+    };
+
+    // Only restore if focus is still stranded on the shell. If another
+    // window, Start, or a dialog has taken focus in the meantime, leave it
+    // alone.
+    if !is_shell_focus_target(&current)
+      || !target.is_valid()
+      || !target.is_visible().unwrap_or(false)
+      || target.is_minimized().unwrap_or(true)
+    {
+      return;
+    }
+
+    info!("Restoring focus from Windows shell to WM-focused window.");
+    if let Err(err) = target.focus() {
+      tracing::warn!("Failed to restore focus from Windows shell: {err}");
+    }
+  });
+}
+
+#[cfg(target_os = "windows")]
+fn is_shell_focus_target(native_window: &NativeWindow) -> bool {
+  native_window.hwnd().0 == 0
+    || native_window.is_desktop_window().unwrap_or(false)
+    || native_window
+      .class_name()
+      .is_ok_and(|class_name| is_taskbar_window_class(&class_name))
+}
+
+#[cfg(any(test, target_os = "windows"))]
+fn is_taskbar_window_class(class_name: &str) -> bool {
+  matches!(class_name, "Shell_TrayWnd" | "Shell_SecondaryTrayWnd")
+}
+
+#[cfg(test)]
+mod tests {
+  use super::is_taskbar_window_class;
+
+  #[test]
+  fn recognizes_only_taskbar_window_classes() {
+    assert!(is_taskbar_window_class("Shell_TrayWnd"));
+    assert!(is_taskbar_window_class("Shell_SecondaryTrayWnd"));
+    assert!(!is_taskbar_window_class("Progman"));
+    assert!(!is_taskbar_window_class("Windows.UI.Core.CoreWindow"));
+  }
 }
