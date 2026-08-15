@@ -8,7 +8,7 @@ use wm_common::{
 #[cfg(target_os = "windows")]
 use wm_platform::NativeWindowWindowsExt;
 #[cfg(target_os = "windows")]
-use wm_platform::{CornerStyle, OpacityValue};
+use wm_platform::{CornerStyle, Dispatcher, NativeWindow, OpacityValue};
 use wm_platform::{Rect, WindowZOrder};
 
 use crate::{
@@ -26,7 +26,7 @@ pub fn platform_sync(
     state.focused_container().context("No focused container.")?;
 
   if state.pending_sync.needs_focus_update() {
-    sync_focus(&focused_container, state)?;
+    sync_focus(&focused_container, state, config)?;
   }
 
   if !state.pending_sync.containers_to_redraw().is_empty()
@@ -81,8 +81,12 @@ pub fn platform_sync(
 fn sync_focus(
   focused_container: &Container,
   state: &mut WmState,
+  config: &UserConfig,
 ) -> anyhow::Result<()> {
   let native_window = focused_container.as_window_container().ok();
+
+  #[cfg(target_os = "windows")]
+  let previous_foreground = state.dispatcher.focused_window().ok();
 
   // Sets focus to the appropriate target:
   // - If the container is a window, focuses that window.
@@ -91,7 +95,7 @@ fn sync_focus(
   //
   // In either case, a `PlatformEvent::WindowFocused` event is subsequently
   // triggered.
-  let result = if let Some(window) = native_window {
+  let result = if let Some(window) = &native_window {
     tracing::info!("Setting focus to window: {window}");
     window.native().focus()
   } else {
@@ -103,11 +107,71 @@ fn sync_focus(
     tracing::warn!("Failed to set focus: {}", err);
   }
 
+  // SetForegroundWindow can be denied transiently by Windows even after
+  // the foreground-input workaround in NativeWindow::focus. Verify the
+  // result after the command has unwound and retry while focus remains
+  // on the exact window that preceded it. If the user, a dialog, or a
+  // newly launched app focuses anything else, the retry stops without
+  // stealing focus back.
+  #[cfg(target_os = "windows")]
+  if config.value.general.restore_focus_on_shell {
+    if let (Some(window), Some(previous_foreground)) =
+      (native_window, previous_foreground)
+    {
+      schedule_focus_convergence(
+        window.native().clone(),
+        previous_foreground,
+        &state.dispatcher,
+      );
+    }
+  }
+
   state.emit_event(WmEvent::FocusChanged {
     focused_container: focused_container.to_dto()?,
   });
 
   Ok(())
+}
+
+#[cfg(target_os = "windows")]
+const FOCUS_CONVERGENCE_DELAYS_MS: [u64; 4] = [75, 150, 300, 600];
+
+#[cfg(target_os = "windows")]
+fn schedule_focus_convergence(
+  target: NativeWindow,
+  previous_foreground: NativeWindow,
+  dispatcher: &Dispatcher,
+) {
+  let dispatcher = dispatcher.clone();
+
+  tokio::task::spawn(async move {
+    for delay_ms in FOCUS_CONVERGENCE_DELAYS_MS {
+      tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+
+      let Ok(current) = dispatcher.focused_window() else {
+        return;
+      };
+
+      if current == target {
+        return;
+      }
+
+      if current != previous_foreground
+        || !target.is_valid()
+        || !target.is_visible().unwrap_or(false)
+        || target.is_minimized().unwrap_or(true)
+      {
+        return;
+      }
+
+      tracing::info!(
+        "Retrying focus while Windows foreground remains unchanged."
+      );
+      if let Err(err) = target.focus() {
+        tracing::warn!("Failed to retry focus: {err}");
+      }
+    }
+  });
 }
 
 /// Finds windows that should be brought to the top of their workspace's
@@ -313,18 +377,17 @@ fn redraw_containers(
       }
     }
 
-    // Skip setting taskbar visibility if the window is hidden (has no
-    // effect). Since cloaked windows are normally always visible in the
-    // taskbar, we only need to set visibility if `show_all_in_taskbar` is
-    // `false`.
+    // Reassert removal for every redraw of a hidden cloaked window. Some
+    // applications can add their taskbar tab again after GlazeWM's
+    // initial Hiding transition. Visible windows are added only during
+    // Showing so a general redraw doesn't reorder taskbar tabs.
     #[cfg(target_os = "windows")]
-    if config.value.general.hide_method == HideMethod::Cloak
-      && !config.value.general.show_all_in_taskbar
-      && matches!(
-        window.display_state(),
-        DisplayState::Showing | DisplayState::Hiding
-      )
-    {
+    if should_sync_taskbar_visibility(
+      &config.value.general.hide_method,
+      config.value.general.show_all_in_taskbar,
+      &window.display_state(),
+      is_visible,
+    ) {
       if let Err(err) = window.native().set_taskbar_visibility(is_visible)
       {
         tracing::warn!("Failed to set taskbar visibility: {}", err);
@@ -333,6 +396,18 @@ fn redraw_containers(
   }
 
   Ok(())
+}
+
+#[cfg(any(test, target_os = "windows"))]
+fn should_sync_taskbar_visibility(
+  hide_method: &HideMethod,
+  show_all_in_taskbar: bool,
+  display_state: &DisplayState,
+  is_visible: bool,
+) -> bool {
+  *hide_method == HideMethod::Cloak
+    && !show_all_in_taskbar
+    && (!is_visible || *display_state == DisplayState::Showing)
 }
 
 fn reposition_window(
@@ -616,4 +691,59 @@ fn apply_transparency_effect(
   };
 
   _ = window.native().set_transparency(transparency);
+}
+
+#[cfg(test)]
+mod tests {
+  use wm_common::{DisplayState, HideMethod};
+
+  use super::should_sync_taskbar_visibility;
+
+  #[test]
+  fn syncs_hidden_cloaked_windows_on_every_redraw() {
+    assert!(should_sync_taskbar_visibility(
+      &HideMethod::Cloak,
+      false,
+      &DisplayState::Hidden,
+      false,
+    ));
+    assert!(should_sync_taskbar_visibility(
+      &HideMethod::Cloak,
+      false,
+      &DisplayState::Hiding,
+      false,
+    ));
+  }
+
+  #[test]
+  fn adds_visible_taskbar_tabs_only_while_showing() {
+    assert!(should_sync_taskbar_visibility(
+      &HideMethod::Cloak,
+      false,
+      &DisplayState::Showing,
+      true,
+    ));
+    assert!(!should_sync_taskbar_visibility(
+      &HideMethod::Cloak,
+      false,
+      &DisplayState::Shown,
+      true,
+    ));
+  }
+
+  #[test]
+  fn respects_taskbar_and_hide_method_configuration() {
+    assert!(!should_sync_taskbar_visibility(
+      &HideMethod::Cloak,
+      true,
+      &DisplayState::Hidden,
+      false,
+    ));
+    assert!(!should_sync_taskbar_visibility(
+      &HideMethod::Hide,
+      false,
+      &DisplayState::Hidden,
+      false,
+    ));
+  }
 }
