@@ -28,29 +28,28 @@ async fn main() -> anyhow::Result<()> {
     watch_managed_handles(&mut client, &mut managed_handles).await;
 
   match subscribe_res {
-    Ok(()) => {
-      tracing::info!("WM exited successfully. Skipping watcher cleanup.");
+    Ok(()) => tracing::info!("WM exited successfully. Restoring windows."),
+    Err(err) => tracing::info!(
+      "Running watcher cleanup. WM exited unexpectedly: {}",
+      err
+    ),
+  }
+
+  let managed_windows =
+    managed_handles.into_iter().map(NativeWindow::from_handle);
+
+  for window in managed_windows {
+    if let Err(err) = window.set_cloaked(false) {
+      tracing::warn!("Failed to uncloak window: {:?}", err);
     }
-    Err(err) => {
-      tracing::info!(
-        "Running watcher cleanup. WM exited unexpectedly: {}",
-        err
-      );
 
-      let managed_windows =
-        managed_handles.into_iter().map(NativeWindow::from_handle);
-
-      for window in managed_windows {
-        if let Err(err) = window.show() {
-          tracing::warn!("Failed to show window: {:?}", err);
-        }
-
-        let _ = window.set_taskbar_visibility(true);
-        let _ = window.set_border_color(None);
-        let _ =
-          window.set_transparency(&OpacityValue::from_alpha(u8::MAX));
-      }
+    if let Err(err) = window.show() {
+      tracing::warn!("Failed to show window: {:?}", err);
     }
+
+    let _ = window.set_taskbar_visibility(true);
+    let _ = window.set_border_color(None);
+    let _ = window.set_transparency(&OpacityValue::from_alpha(u8::MAX));
   }
 
   Ok(())
