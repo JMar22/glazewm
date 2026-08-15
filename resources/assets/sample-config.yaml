@@ -14,6 +14,11 @@ general:
   # Whether to automatically focus windows underneath the cursor.
   focus_follows_cursor: false
 
+  # Windows-only: restore the WM's focused window when focus remains on
+  # the desktop or taskbar. A short delay lets normal taskbar actions,
+  # Start, and dialogs take focus first.
+  restore_focus_on_shell: false
+
   # Whether to switch back and forth between the previously focused
   # workspace when focusing the current workspace.
   toggle_workspace_on_refocus: false
