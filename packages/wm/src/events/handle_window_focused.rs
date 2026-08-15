@@ -129,7 +129,7 @@ fn should_override_focus(state: &WmState) -> bool {
 }
 
 #[cfg(target_os = "windows")]
-const SHELL_FOCUS_RESTORE_DELAY_MS: u64 = 150;
+const SHELL_FOCUS_RESTORE_DELAYS_MS: [u64; 4] = [150, 150, 300, 600];
 
 #[cfg(target_os = "windows")]
 fn should_restore_shell_focus(
@@ -163,29 +163,33 @@ fn schedule_shell_focus_restore(
   let dispatcher = state.dispatcher.clone();
 
   tokio::task::spawn(async move {
-    tokio::time::sleep(std::time::Duration::from_millis(
-      SHELL_FOCUS_RESTORE_DELAY_MS,
-    ))
-    .await;
+    for delay_ms in SHELL_FOCUS_RESTORE_DELAYS_MS {
+      tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
 
-    let Ok(current) = dispatcher.focused_window() else {
-      return;
-    };
+      let Ok(current) = dispatcher.focused_window() else {
+        return;
+      };
 
-    // Only restore if focus is still stranded on the shell. If another
-    // window, Start, or a dialog has taken focus in the meantime, leave it
-    // alone.
-    if !is_shell_focus_target(&current)
-      || !target.is_valid()
-      || !target.is_visible().unwrap_or(false)
-      || target.is_minimized().unwrap_or(true)
-    {
-      return;
-    }
+      if current == target {
+        return;
+      }
 
-    info!("Restoring focus from Windows shell to WM-focused window.");
-    if let Err(err) = target.focus() {
-      tracing::warn!("Failed to restore focus from Windows shell: {err}");
+      // Only restore while focus remains stranded on the shell. If
+      // another window, Start, or a dialog takes focus, leave it alone.
+      if !is_shell_focus_target(&current)
+        || !target.is_valid()
+        || !target.is_visible().unwrap_or(false)
+        || target.is_minimized().unwrap_or(true)
+      {
+        return;
+      }
+
+      info!("Restoring focus from Windows shell to WM-focused window.");
+      if let Err(err) = target.focus() {
+        tracing::warn!(
+          "Failed to restore focus from Windows shell: {err}"
+        );
+      }
     }
   });
 }
