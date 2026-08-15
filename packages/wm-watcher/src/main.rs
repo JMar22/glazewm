@@ -52,7 +52,10 @@ async fn main() -> anyhow::Result<()> {
     let _ = window.set_transparency(&OpacityValue::from_alpha(u8::MAX));
   }
 
-  Ok(())
+  // Uncloaking uses Shell-owned application-view COM objects whose
+  // thread-local teardown can outlive the work above. This process has no
+  // remaining responsibilities, so exit without waiting on COM teardown.
+  std::process::exit(0);
 }
 
 async fn query_initial_windows(
