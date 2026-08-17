@@ -1,0 +1,174 @@
+name: Sync upstream
+
+on:
+  schedule:
+    - cron: '23 9 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sync ${{ matrix.branch }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        branch:
+          - main
+          - feature/fullscreen-window-cycling
+
+    steps:
+      - name: Check out fork branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ matrix.branch }}
+
+      - name: Merge upstream main
+        id: merge
+        shell: bash
+        env:
+          TARGET_BRANCH: ${{ matrix.branch }}
+          UPSTREAM_REPOSITORY: glzr-io/glazewm
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git remote add upstream "https://github.com/${UPSTREAM_REPOSITORY}.git" 2>/dev/null || \
+            git remote set-url upstream "https://github.com/${UPSTREAM_REPOSITORY}.git"
+          git fetch --no-tags upstream main
+
+          upstream_sha=$(git rev-parse upstream/main)
+
+          if git merge-base --is-ancestor upstream/main HEAD; then
+            {
+              echo "upstream_sha=${upstream_sha}"
+              echo 'changed=false'
+              echo 'conflict=false'
+            } >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          set +e
+          git merge --no-commit --no-ff upstream/main
+          merge_status=$?
+          set -e
+
+          if ((merge_status != 0)); then
+            conflicts=$(git diff --name-only --diff-filter=U | paste -sd ', ' -)
+            git merge --abort
+            {
+              echo "upstream_sha=${upstream_sha}"
+              echo 'changed=false'
+              echo 'conflict=true'
+              echo "conflicts=${conflicts:-unknown files}"
+            } >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if git diff --cached --quiet; then
+            changed=false
+          else
+            changed=true
+          fi
+          {
+            echo "upstream_sha=${upstream_sha}"
+            echo "changed=${changed}"
+            echo 'conflict=false'
+          } >>"$GITHUB_OUTPUT"
+
+      - name: Install Rust toolchain
+        if: steps.merge.outputs.changed == 'true' && steps.merge.outputs.conflict != 'true'
+        uses: dtolnay/rust-toolchain@21dc36fb71dd22e3317045c0c31a3f4249868b17
+        with:
+          components: clippy, rustfmt
+          targets: x86_64-pc-windows-msvc
+          toolchain: nightly
+
+      - name: Restore Rust cache
+        if: steps.merge.outputs.changed == 'true' && steps.merge.outputs.conflict != 'true'
+        uses: swatinem/rust-cache@f0deed1e0edfc6a9be95417288c0e1099b1eeec3
+        with:
+          shared-key: upstream-sync-x86_64-pc-windows-msvc-${{ hashFiles('Cargo.lock') }}
+
+      - name: Validate merged fork
+        id: validation
+        if: steps.merge.outputs.changed == 'true' && steps.merge.outputs.conflict != 'true'
+        continue-on-error: true
+        shell: bash
+        env:
+          VERSION_NUMBER: 0.0.0-upstream-sync
+        run: |
+          set -euo pipefail
+          cargo fmt --all -- --check
+          cargo clippy --locked --workspace --target x86_64-pc-windows-msvc -- -D warnings
+          cargo test --locked -p wm --bin glazewm --target x86_64-pc-windows-msvc
+
+      - name: Publish merged fork
+        id: publish
+        if: steps.merge.outputs.changed == 'true' && steps.merge.outputs.conflict != 'true' && steps.validation.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        env:
+          TARGET_BRANCH: ${{ matrix.branch }}
+          UPSTREAM_SHA: ${{ steps.merge.outputs.upstream_sha }}
+        run: |
+          set -euo pipefail
+          git commit -m "chore: sync ${TARGET_BRANCH} with upstream main (${UPSTREAM_SHA:0:8})"
+          git push origin "HEAD:refs/heads/${TARGET_BRANCH}"
+
+      - name: Notify when automatic sync is blocked
+        if: always() && steps.merge.outcome == 'success' && (steps.merge.outputs.conflict == 'true' || steps.validation.outcome == 'failure' || steps.publish.outcome == 'failure')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_TITLE: '[upstream-sync] ${{ matrix.branch }} is blocked'
+          TARGET_BRANCH: ${{ matrix.branch }}
+          CONFLICTS: ${{ steps.merge.outputs.conflicts }}
+        run: |
+          set -euo pipefail
+          if [[ '${{ steps.merge.outputs.conflict }}' == 'true' ]]; then
+            reason="Merge conflict in: ${CONFLICTS:-unknown files}"
+          elif [[ '${{ steps.validation.outcome }}' == 'failure' ]]; then
+            reason='The upstream merge was clean, but Windows validation failed.'
+          else
+            reason='The upstream merge and validation succeeded, but the branch push was rejected.'
+          fi
+
+          body="Automatic upstream synchronization for \`${TARGET_BRANCH}\` is blocked.
+
+          ${reason}
+
+          Workflow run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          issue_number=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 100 \
+            --json number,title --jq ".[] | select(.title == \"${ISSUE_TITLE}\") | .number" | head -n 1)
+
+          if [[ -n "$issue_number" ]]; then
+            gh issue comment "$issue_number" --repo "$GITHUB_REPOSITORY" --body "$body"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$ISSUE_TITLE" \
+              --body "$body" --assignee "$GITHUB_REPOSITORY_OWNER"
+          fi
+          exit 1
+
+      - name: Resolve prior sync notification
+        if: always() && steps.merge.outcome == 'success' && steps.merge.outputs.conflict != 'true' && (steps.merge.outputs.changed != 'true' || (steps.validation.outcome == 'success' && steps.publish.outcome == 'success'))
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_TITLE: '[upstream-sync] ${{ matrix.branch }} is blocked'
+        run: |
+          set -euo pipefail
+          issue_number=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 100 \
+            --json number,title --jq ".[] | select(.title == \"${ISSUE_TITLE}\") | .number" | head -n 1)
+          if [[ -n "$issue_number" ]]; then
+            gh issue close "$issue_number" --repo "$GITHUB_REPOSITORY" \
+              --comment 'Automatic upstream synchronization is healthy again.'
+          fi
