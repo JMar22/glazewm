@@ -81,6 +81,7 @@ pub fn platform_sync(
 fn sync_focus(
   focused_container: &Container,
   state: &mut WmState,
+  #[cfg_attr(not(target_os = "windows"), allow(unused_variables))]
   config: &UserConfig,
 ) -> anyhow::Result<()> {
   let native_window = focused_container.as_window_container().ok();
