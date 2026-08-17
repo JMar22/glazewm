@@ -15,27 +15,21 @@ concurrency:
 
 jobs:
   sync:
-    name: Sync ${{ matrix.branch }}
+    name: Sync main
     runs-on: windows-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        branch:
-          - main
-          - feature/fullscreen-window-cycling
 
     steps:
       - name: Check out fork branch
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ matrix.branch }}
+          ref: main
 
       - name: Merge upstream main
         id: merge
         shell: bash
         env:
-          TARGET_BRANCH: ${{ matrix.branch }}
+          TARGET_BRANCH: main
           UPSTREAM_REPOSITORY: glzr-io/glazewm
         run: |
           set -euo pipefail
@@ -117,7 +111,7 @@ jobs:
         continue-on-error: true
         shell: bash
         env:
-          TARGET_BRANCH: ${{ matrix.branch }}
+          TARGET_BRANCH: main
           UPSTREAM_SHA: ${{ steps.merge.outputs.upstream_sha }}
         run: |
           set -euo pipefail
@@ -129,8 +123,8 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          ISSUE_TITLE: '[upstream-sync] ${{ matrix.branch }} is blocked'
-          TARGET_BRANCH: ${{ matrix.branch }}
+          ISSUE_TITLE: '[upstream-sync] main is blocked'
+          TARGET_BRANCH: main
           CONFLICTS: ${{ steps.merge.outputs.conflicts }}
         run: |
           set -euo pipefail
@@ -163,7 +157,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          ISSUE_TITLE: '[upstream-sync] ${{ matrix.branch }} is blocked'
+          ISSUE_TITLE: '[upstream-sync] main is blocked'
         run: |
           set -euo pipefail
           issue_number=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 100 \
