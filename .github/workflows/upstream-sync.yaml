@@ -25,8 +25,8 @@ jobs:
           fetch-depth: 0
           ref: main
 
-      - name: Merge upstream main
-        id: merge
+      - name: Rebase onto upstream main
+        id: rebase
         shell: bash
         env:
           TARGET_BRANCH: main
@@ -40,10 +40,12 @@ jobs:
           git fetch --no-tags upstream main
 
           upstream_sha=$(git rev-parse upstream/main)
+          before_sha=$(git rev-parse HEAD)
 
           if git merge-base --is-ancestor upstream/main HEAD; then
             {
               echo "upstream_sha=${upstream_sha}"
+              echo "before_sha=${before_sha}"
               echo 'changed=false'
               echo 'conflict=false'
             } >>"$GITHUB_OUTPUT"
@@ -51,15 +53,16 @@ jobs:
           fi
 
           set +e
-          git merge --no-commit --no-ff upstream/main
-          merge_status=$?
+          git rebase upstream/main
+          rebase_status=$?
           set -e
 
-          if ((merge_status != 0)); then
+          if ((rebase_status != 0)); then
             conflicts=$(git diff --name-only --diff-filter=U | paste -sd ', ' -)
-            git merge --abort
+            git rebase --abort
             {
               echo "upstream_sha=${upstream_sha}"
+              echo "before_sha=${before_sha}"
               echo 'changed=false'
               echo 'conflict=true'
               echo "conflicts=${conflicts:-unknown files}"
@@ -67,19 +70,15 @@ jobs:
             exit 0
           fi
 
-          if git diff --cached --quiet; then
-            changed=false
-          else
-            changed=true
-          fi
           {
             echo "upstream_sha=${upstream_sha}"
-            echo "changed=${changed}"
+            echo "before_sha=${before_sha}"
+            echo 'changed=true'
             echo 'conflict=false'
           } >>"$GITHUB_OUTPUT"
 
       - name: Install Rust toolchain
-        if: steps.merge.outputs.changed == 'true' && steps.merge.outputs.conflict != 'true'
+        if: steps.rebase.outputs.changed == 'true' && steps.rebase.outputs.conflict != 'true'
         uses: dtolnay/rust-toolchain@21dc36fb71dd22e3317045c0c31a3f4249868b17
         with:
           components: clippy, rustfmt
@@ -87,14 +86,14 @@ jobs:
           toolchain: nightly
 
       - name: Restore Rust cache
-        if: steps.merge.outputs.changed == 'true' && steps.merge.outputs.conflict != 'true'
+        if: steps.rebase.outputs.changed == 'true' && steps.rebase.outputs.conflict != 'true'
         uses: swatinem/rust-cache@f0deed1e0edfc6a9be95417288c0e1099b1eeec3
         with:
           shared-key: upstream-sync-x86_64-pc-windows-msvc-${{ hashFiles('Cargo.lock') }}
 
-      - name: Validate merged fork
+      - name: Validate rebased fork
         id: validation
-        if: steps.merge.outputs.changed == 'true' && steps.merge.outputs.conflict != 'true'
+        if: steps.rebase.outputs.changed == 'true' && steps.rebase.outputs.conflict != 'true'
         continue-on-error: true
         shell: bash
         env:
@@ -105,35 +104,35 @@ jobs:
           cargo clippy --locked --workspace --target x86_64-pc-windows-msvc -- -D warnings
           cargo test --locked -p wm --bin glazewm --target x86_64-pc-windows-msvc
 
-      - name: Publish merged fork
+      - name: Publish rebased fork
         id: publish
-        if: steps.merge.outputs.changed == 'true' && steps.merge.outputs.conflict != 'true' && steps.validation.outcome == 'success'
+        if: steps.rebase.outputs.changed == 'true' && steps.rebase.outputs.conflict != 'true' && steps.validation.outcome == 'success'
         continue-on-error: true
         shell: bash
         env:
           TARGET_BRANCH: main
-          UPSTREAM_SHA: ${{ steps.merge.outputs.upstream_sha }}
+          BEFORE_SHA: ${{ steps.rebase.outputs.before_sha }}
         run: |
           set -euo pipefail
-          git commit -m "chore: sync ${TARGET_BRANCH} with upstream main (${UPSTREAM_SHA:0:8})"
-          git push origin "HEAD:refs/heads/${TARGET_BRANCH}"
+          git push --force-with-lease="refs/heads/${TARGET_BRANCH}:${BEFORE_SHA}" \
+            origin "HEAD:refs/heads/${TARGET_BRANCH}"
 
       - name: Notify when automatic sync is blocked
-        if: always() && steps.merge.outcome == 'success' && (steps.merge.outputs.conflict == 'true' || steps.validation.outcome == 'failure' || steps.publish.outcome == 'failure')
+        if: always() && steps.rebase.outcome == 'success' && (steps.rebase.outputs.conflict == 'true' || steps.validation.outcome == 'failure' || steps.publish.outcome == 'failure')
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           ISSUE_TITLE: '[upstream-sync] main is blocked'
           TARGET_BRANCH: main
-          CONFLICTS: ${{ steps.merge.outputs.conflicts }}
+          CONFLICTS: ${{ steps.rebase.outputs.conflicts }}
         run: |
           set -euo pipefail
-          if [[ '${{ steps.merge.outputs.conflict }}' == 'true' ]]; then
-            reason="Merge conflict in: ${CONFLICTS:-unknown files}"
+          if [[ '${{ steps.rebase.outputs.conflict }}' == 'true' ]]; then
+            reason="Rebase conflict in: ${CONFLICTS:-unknown files}"
           elif [[ '${{ steps.validation.outcome }}' == 'failure' ]]; then
-            reason='The upstream merge was clean, but Windows validation failed.'
+            reason='The upstream rebase was clean, but Windows validation failed.'
           else
-            reason='The upstream merge and validation succeeded, but the branch push was rejected.'
+            reason='The upstream rebase and validation succeeded, but the lease-protected branch push was rejected.'
           fi
 
           body="Automatic upstream synchronization for \`${TARGET_BRANCH}\` is blocked.
@@ -153,7 +152,7 @@ jobs:
           exit 1
 
       - name: Resolve prior sync notification
-        if: always() && steps.merge.outcome == 'success' && steps.merge.outputs.conflict != 'true' && (steps.merge.outputs.changed != 'true' || (steps.validation.outcome == 'success' && steps.publish.outcome == 'success'))
+        if: always() && steps.rebase.outcome == 'success' && steps.rebase.outputs.conflict != 'true' && (steps.rebase.outputs.changed != 'true' || (steps.validation.outcome == 'success' && steps.publish.outcome == 'success'))
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
