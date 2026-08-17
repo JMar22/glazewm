@@ -255,14 +255,21 @@ fn redraw_containers(
       .descendant_focus_order()
       .collect::<Vec<_>>();
 
-    // Sort the windows to update by their focus order. The most recently
-    // focused window will be updated first.
-    // TODO: To reduce flicker, redraw windows that will be shown first,
-    // then redraw the ones to be hidden last.
+    // The update loop below runs this list in reverse. Group windows from
+    // displayed workspaces at the end so they are revealed before windows
+    // from the outgoing workspace are hidden. This prevents the desktop
+    // from flashing between the two operations. Within each group, retain
+    // focus order so the most recently focused window is updated last and
+    // remains at the top of the stack.
     windows.sort_by_key(|window| {
-      descendant_focus_order
-        .iter()
-        .position(|order| order.id() == window.id())
+      redraw_sort_key(
+        window
+          .workspace()
+          .is_some_and(|workspace| workspace.is_displayed()),
+        descendant_focus_order
+          .iter()
+          .position(|order| order.id() == window.id()),
+      )
     });
 
     windows
@@ -396,6 +403,13 @@ fn redraw_containers(
   }
 
   Ok(())
+}
+
+fn redraw_sort_key(
+  will_be_visible: bool,
+  focus_order: Option<usize>,
+) -> (bool, Option<usize>) {
+  (will_be_visible, focus_order)
 }
 
 #[cfg(any(test, target_os = "windows"))]
@@ -697,7 +711,37 @@ fn apply_transparency_effect(
 mod tests {
   use wm_common::{DisplayState, HideMethod};
 
-  use super::should_sync_taskbar_visibility;
+  use super::{redraw_sort_key, should_sync_taskbar_visibility};
+
+  #[test]
+  fn redraws_destination_before_hiding_outgoing_workspace() {
+    let mut windows = [
+      ("outgoing_focused", false, Some(0)),
+      ("destination_focused", true, Some(1)),
+      ("outgoing_other", false, Some(2)),
+      ("destination_other", true, Some(3)),
+    ];
+
+    windows.sort_by_key(|(_, is_displayed, focus_order)| {
+      redraw_sort_key(*is_displayed, *focus_order)
+    });
+
+    let update_order = windows
+      .iter()
+      .rev()
+      .map(|(name, _, _)| *name)
+      .collect::<Vec<_>>();
+
+    assert_eq!(
+      update_order,
+      [
+        "destination_other",
+        "destination_focused",
+        "outgoing_other",
+        "outgoing_focused",
+      ]
+    );
+  }
 
   #[test]
   fn syncs_hidden_cloaked_windows_on_every_redraw() {
