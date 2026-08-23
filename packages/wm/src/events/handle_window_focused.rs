@@ -2,9 +2,9 @@ use anyhow::Context;
 use tracing::info;
 use wm_common::{DisplayState, WindowRuleEvent, WmEvent};
 use wm_platform::NativeWindow;
-#[cfg(target_os = "windows")]
-use wm_platform::NativeWindowWindowsExt;
 
+#[cfg(target_os = "windows")]
+use crate::commands::general::is_shell_focus_target;
 use crate::{
   commands::{
     container::set_focused_descendant, window::run_window_rules,
@@ -192,31 +192,4 @@ fn schedule_shell_focus_restore(
       }
     }
   });
-}
-
-#[cfg(target_os = "windows")]
-fn is_shell_focus_target(native_window: &NativeWindow) -> bool {
-  native_window.hwnd().0 == 0
-    || native_window.is_desktop_window().unwrap_or(false)
-    || native_window
-      .class_name()
-      .is_ok_and(|class_name| is_taskbar_window_class(&class_name))
-}
-
-#[cfg(any(test, target_os = "windows"))]
-fn is_taskbar_window_class(class_name: &str) -> bool {
-  matches!(class_name, "Shell_TrayWnd" | "Shell_SecondaryTrayWnd")
-}
-
-#[cfg(test)]
-mod tests {
-  use super::is_taskbar_window_class;
-
-  #[test]
-  fn recognizes_only_taskbar_window_classes() {
-    assert!(is_taskbar_window_class("Shell_TrayWnd"));
-    assert!(is_taskbar_window_class("Shell_SecondaryTrayWnd"));
-    assert!(!is_taskbar_window_class("Progman"));
-    assert!(!is_taskbar_window_class("Windows.UI.Core.CoreWindow"));
-  }
 }

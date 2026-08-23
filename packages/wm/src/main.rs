@@ -30,8 +30,8 @@ use wm_platform::{
 };
 
 use crate::{
-  ipc_server::IpcServer, sys_tray::SystemTray, user_config::UserConfig,
-  wm::WindowManager,
+  commands::general::reconcile_stranded_focus, ipc_server::IpcServer,
+  sys_tray::SystemTray, user_config::UserConfig, wm::WindowManager,
 };
 
 mod commands;
@@ -184,6 +184,15 @@ async fn start_wm(
   cleanup_interval
     .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
+  // Create an interval for recovering keyboard focus stranded on the
+  // Windows shell. Dismissing a taskbar flyout can leave focus nowhere
+  // without emitting any foreground event, so that state has to be polled
+  // for. Kept short, since the desktop is unusable until it resolves.
+  let mut focus_reconcile_interval =
+    tokio::time::interval(Duration::from_secs(1));
+  focus_reconcile_interval
+    .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
   loop {
     let res = tokio::select! {
       _ = signal::ctrl_c() => {
@@ -214,6 +223,9 @@ async fn start_wm(
         tracing::debug!("Received keyboard event: {:?}", event);
         wm.process_event(PlatformEvent::Keybinding(event), &mut config)
       }
+      _ = focus_reconcile_interval.tick() => {
+        reconcile_stranded_focus(&mut wm.state, &config)
+      },
       _ = cleanup_interval.tick() => {
         if wm.state.is_paused {
           Ok(())

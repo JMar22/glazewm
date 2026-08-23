@@ -1,0 +1,145 @@
+//! Recovery for keyboard focus stranded on the Windows shell.
+//!
+//! `handle_window_focused` restores focus when a foreground event tells us
+//! the shell took it. Some transitions never produce that event: when a
+//! taskbar flyout (Widgets, Search, the wifi/audio/battery quick settings)
+//! is dismissed, Windows either drops the foreground entirely or leaves it
+//! on the flyout's now-cloaked host window. `EVENT_SYSTEM_FOREGROUND` does
+//! not fire for either, so focus sits nowhere until the user clicks a real
+//! window. This polls for that state instead of waiting for an event that
+//! never arrives.
+
+#[cfg(target_os = "windows")]
+use tracing::info;
+#[cfg(target_os = "windows")]
+use wm_common::DisplayState;
+#[cfg(target_os = "windows")]
+use wm_platform::{NativeWindow, NativeWindowWindowsExt};
+
+#[cfg(target_os = "windows")]
+use crate::traits::{CommonGetters, WindowGetters};
+use crate::{user_config::UserConfig, wm_state::WmState};
+
+/// Number of consecutive polls that must observe stranded focus before it
+/// is restored. Debouncing avoids racing the brief foreground gaps that
+/// occur during normal window activation.
+#[cfg(target_os = "windows")]
+const STRANDED_FOCUS_TICKS_BEFORE_RESTORE: u32 = 2;
+
+/// Restores focus to the WM's focused window when the OS has left keyboard
+/// focus stranded on the shell.
+///
+/// A failed restore is logged rather than propagated, but the fallible
+/// signature is kept so this matches the other arms of the main event
+/// loop.
+#[cfg(target_os = "windows")]
+#[allow(clippy::unnecessary_wraps)]
+pub fn reconcile_stranded_focus(
+  state: &mut WmState,
+  config: &UserConfig,
+) -> anyhow::Result<()> {
+  if state.is_paused || !config.value.general.restore_focus_on_shell {
+    state.stranded_focus_ticks = 0;
+    return Ok(());
+  }
+
+  // Only restore to a window the user can actually see. A hidden or
+  // minimized target means there is nothing to return focus to.
+  let target = state
+    .focused_container()
+    .and_then(|container| container.as_window_container().ok())
+    .filter(|window| {
+      matches!(
+        window.display_state(),
+        DisplayState::Shown | DisplayState::Showing
+      )
+    })
+    .map(|window| window.native().clone())
+    .filter(|native| {
+      native.is_visible().unwrap_or(false)
+        && !native.is_minimized().unwrap_or(true)
+    });
+
+  let (Some(target), Ok(current)) =
+    (target, state.dispatcher.focused_window())
+  else {
+    state.stranded_focus_ticks = 0;
+    return Ok(());
+  };
+
+  if current == target || !is_stranded_focus_target(&current) {
+    state.stranded_focus_ticks = 0;
+    return Ok(());
+  }
+
+  state.stranded_focus_ticks += 1;
+  if state.stranded_focus_ticks < STRANDED_FOCUS_TICKS_BEFORE_RESTORE {
+    return Ok(());
+  }
+
+  state.stranded_focus_ticks = 0;
+  info!("Restoring focus stranded on the Windows shell.");
+
+  if let Err(err) = target.focus() {
+    tracing::warn!("Failed to restore stranded focus: {err}");
+  }
+
+  Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+#[allow(clippy::unnecessary_wraps)]
+pub fn reconcile_stranded_focus(
+  _state: &mut WmState,
+  _config: &UserConfig,
+) -> anyhow::Result<()> {
+  Ok(())
+}
+
+/// Whether keyboard focus currently sits somewhere the user cannot type.
+///
+/// This is deliberately wider than [`is_shell_focus_target`]: a dismissed
+/// taskbar flyout can remain the foreground window while cloaked.
+/// `is_visible` already accounts for cloaking, so an *open* flyout is
+/// visible and uncloaked and never matches here — it keeps its focus and
+/// stays usable.
+#[cfg(target_os = "windows")]
+pub(crate) fn is_stranded_focus_target(
+  native_window: &NativeWindow,
+) -> bool {
+  is_shell_focus_target(native_window)
+    || !native_window.is_visible().unwrap_or(true)
+}
+
+/// Whether a focus event target is the desktop or the taskbar frame.
+#[cfg(target_os = "windows")]
+pub(crate) fn is_shell_focus_target(native_window: &NativeWindow) -> bool {
+  native_window.hwnd().0 == 0
+    || native_window.is_desktop_window().unwrap_or(false)
+    || native_window
+      .class_name()
+      .is_ok_and(|class_name| is_taskbar_window_class(&class_name))
+}
+
+#[cfg(any(test, target_os = "windows"))]
+pub(crate) fn is_taskbar_window_class(class_name: &str) -> bool {
+  matches!(class_name, "Shell_TrayWnd" | "Shell_SecondaryTrayWnd")
+}
+
+#[cfg(test)]
+mod tests {
+  use super::is_taskbar_window_class;
+
+  #[test]
+  fn recognizes_only_taskbar_window_classes() {
+    assert!(is_taskbar_window_class("Shell_TrayWnd"));
+    assert!(is_taskbar_window_class("Shell_SecondaryTrayWnd"));
+    assert!(!is_taskbar_window_class("Progman"));
+
+    // The flyout hosts for Widgets, Search, and quick settings share this
+    // class with the Start menu. Matching it would steal focus from a
+    // flyout the user is actively typing into; the stranded-focus poll
+    // recovers them after dismissal instead.
+    assert!(!is_taskbar_window_class("Windows.UI.Core.CoreWindow"));
+  }
+}

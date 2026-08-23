@@ -67,6 +67,14 @@ pub struct WmState {
   /// Whether the OS focused window is the same as the WM focused window.
   pub is_focus_synced: bool,
 
+  /// Consecutive polls that have observed keyboard focus stranded on the
+  /// Windows shell.
+  ///
+  /// Used to debounce `reconcile_stranded_focus` so that the brief
+  /// foreground gaps during normal window activation are not mistaken for
+  /// stranded focus.
+  pub stranded_focus_ticks: u32,
+
   /// Whether the initial state has been populated.
   has_initialized: bool,
 
@@ -94,6 +102,7 @@ impl WmState {
       ignored_windows: Vec::new(),
       is_paused: false,
       is_focus_synced: false,
+      stranded_focus_ticks: 0,
       has_initialized: false,
       event_tx,
       exit_tx,
