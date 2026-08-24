@@ -14,7 +14,9 @@ use tracing::info;
 #[cfg(target_os = "windows")]
 use wm_common::DisplayState;
 #[cfg(target_os = "windows")]
-use wm_platform::{NativeWindow, NativeWindowWindowsExt};
+use wm_platform::{
+  DispatcherExtWindows, NativeWindow, NativeWindowWindowsExt,
+};
 
 #[cfg(target_os = "windows")]
 use crate::traits::{CommonGetters, WindowGetters};
@@ -39,6 +41,20 @@ pub fn reconcile_stranded_focus(
   config: &UserConfig,
 ) -> anyhow::Result<()> {
   if state.is_paused || !config.value.general.restore_focus_on_shell {
+    state.stranded_focus_ticks = 0;
+    return Ok(());
+  }
+
+  // A locked session has no user to hand focus back to, and the lock
+  // screen legitimately holds the foreground, so every poll would read
+  // as stranded. Restoring focus calls `SendInput` to defeat the
+  // foreground lock, which Windows counts as user input and uses to
+  // wake the display -- polling that against a lock screen turns the
+  // display back on within seconds of it going off, indefinitely.
+  //
+  // A failed query is treated as unlocked so that a broken lock check
+  // degrades to the previous behaviour rather than disabling recovery.
+  if state.dispatcher.is_session_locked().unwrap_or(false) {
     state.stranded_focus_ticks = 0;
     return Ok(());
   }

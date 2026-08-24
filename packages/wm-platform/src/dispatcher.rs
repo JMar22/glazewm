@@ -23,10 +23,16 @@ use objc2_core_graphics::{CGError, CGEvent, CGWarpMouseCursorPosition};
 use objc2_foundation::NSString;
 #[cfg(target_os = "windows")]
 use windows::{
-  core::PCWSTR,
+  core::{PCWSTR, PWSTR},
   Win32::{
-    Foundation::POINT,
-    System::Environment::ExpandEnvironmentStringsW,
+    Foundation::{HANDLE, POINT},
+    System::{
+      Environment::ExpandEnvironmentStringsW,
+      RemoteDesktop::{
+        WTSFreeMemory, WTSQuerySessionInformationW, WTSSessionInfoEx,
+        WTSINFOEXW, WTS_CURRENT_SESSION, WTS_SESSIONSTATE_LOCK,
+      },
+    },
     UI::{
       Input::KeyboardAndMouse::{
         GetAsyncKeyState, VK_LBUTTON, VK_RBUTTON,
@@ -150,6 +156,13 @@ pub trait DispatcherExtWindows {
     enable: bool,
   ) -> crate::Result<()>;
 
+  /// Gets whether the current session's workstation is locked.
+  ///
+  /// # Platform-specific
+  ///
+  /// This method is only available on Windows.
+  fn is_session_locked(&self) -> crate::Result<bool>;
+
   /// Expands `%VAR%` environment variable references in `input`.
   ///
   /// Returns the expanded string.
@@ -244,6 +257,50 @@ impl DispatcherExtWindows for Dispatcher {
     }?;
 
     Ok(())
+  }
+
+  fn is_session_locked(&self) -> crate::Result<bool> {
+    let mut buffer = PWSTR::null();
+    let mut bytes_returned = 0_u32;
+
+    // `WTS_CURRENT_SERVER_HANDLE` is the null handle.
+    unsafe {
+      WTSQuerySessionInformationW(
+        HANDLE::default(),
+        WTS_CURRENT_SESSION,
+        WTSSessionInfoEx,
+        std::ptr::from_mut(&mut buffer),
+        std::ptr::from_mut(&mut bytes_returned),
+      )
+    }?;
+
+    if buffer.is_null() {
+      return Ok(false);
+    }
+
+    let ptr = buffer.as_ptr();
+
+    // The size must gate the read rather than follow it: a short
+    // buffer would make `read_unaligned` reach past what WTS returned.
+    // A larger struct from a future Windows is safe to read as ours.
+    let info = (bytes_returned as usize
+      >= std::mem::size_of::<WTSINFOEXW>())
+    .then(|| unsafe { ptr.cast::<WTSINFOEXW>().read_unaligned() });
+
+    unsafe { WTSFreeMemory(ptr.cast()) };
+
+    // An unexpected level means the flags are not laid out where the
+    // union expects, so report unlocked rather than trusting them.
+    let Some(info) = info.filter(|info| info.Level == 1) else {
+      return Ok(false);
+    };
+
+    let session_flags = unsafe { info.Data.WTSInfoExLevel1 }.SessionFlags;
+
+    Ok(
+      u32::try_from(session_flags)
+        .is_ok_and(|flags| flags == WTS_SESSIONSTATE_LOCK),
+    )
   }
 
   fn expand_env_strings(&self, input: &str) -> crate::Result<String> {
