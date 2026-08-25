@@ -300,8 +300,20 @@ impl NativeWindow {
       SendInput(&input, std::mem::size_of::<INPUT>() as i32)
     };
 
-    // Set as the foreground window.
-    unsafe { SetForegroundWindow(self.hwnd()) }.ok()?;
+    // Set as the foreground window. Windows only grants the foreground to
+    // the process that last received input, so this is refused whenever
+    // something else holds it -- the shell keeping it after a taskbar
+    // flyout is dismissed being the case that shows up in practice.
+    //
+    // A refusal is reported by returning FALSE without setting a last
+    // error, so `.ok()?` would surface it as the windows-rs rendering of
+    // error code 0: "The operation completed successfully."
+    if !unsafe { SetForegroundWindow(self.hwnd()) }.as_bool() {
+      return Err(crate::Error::Platform(format!(
+        "SetForegroundWindow was refused for window {:#x}.",
+        self.hwnd().0
+      )));
+    }
 
     Ok(())
   }

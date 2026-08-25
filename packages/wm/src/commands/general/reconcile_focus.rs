@@ -28,6 +28,15 @@ use crate::{user_config::UserConfig, wm_state::WmState};
 #[cfg(target_os = "windows")]
 const STRANDED_FOCUS_TICKS_BEFORE_RESTORE: u32 = 2;
 
+/// Restores attempted for one stranded stretch before giving up.
+///
+/// Windows grants foreground rights to the process that last received
+/// input. When the shell refuses `SetForegroundWindow` it keeps refusing
+/// until the user interacts, so retrying forever cannot recover focus and
+/// sends an input event every couple of seconds to no purpose.
+#[cfg(target_os = "windows")]
+const STRANDED_FOCUS_MAX_ATTEMPTS: u32 = 3;
+
 /// Restores focus to the WM's focused window when the OS has left keyboard
 /// focus stranded on the shell.
 ///
@@ -42,6 +51,7 @@ pub fn reconcile_stranded_focus(
 ) -> anyhow::Result<()> {
   if state.is_paused || !config.value.general.restore_focus_on_shell {
     state.stranded_focus_ticks = 0;
+    state.stranded_focus_attempts = 0;
     return Ok(());
   }
 
@@ -56,6 +66,7 @@ pub fn reconcile_stranded_focus(
   // degrades to the previous behaviour rather than disabling recovery.
   if state.dispatcher.is_session_locked().unwrap_or(false) {
     state.stranded_focus_ticks = 0;
+    state.stranded_focus_attempts = 0;
     return Ok(());
   }
 
@@ -80,11 +91,13 @@ pub fn reconcile_stranded_focus(
     (target, state.dispatcher.focused_window())
   else {
     state.stranded_focus_ticks = 0;
+    state.stranded_focus_attempts = 0;
     return Ok(());
   };
 
   if current == target || !is_stranded_focus_target(&current) {
     state.stranded_focus_ticks = 0;
+    state.stranded_focus_attempts = 0;
     return Ok(());
   }
 
@@ -94,10 +107,28 @@ pub fn reconcile_stranded_focus(
   }
 
   state.stranded_focus_ticks = 0;
+
+  // Stop once the shell has refused often enough to show it will keep
+  // refusing. The counter is cleared as soon as focus lands anywhere
+  // real, so a later stranding gets a fresh set of attempts.
+  if state.stranded_focus_attempts >= STRANDED_FOCUS_MAX_ATTEMPTS {
+    return Ok(());
+  }
+
+  state.stranded_focus_attempts += 1;
   info!("Restoring focus stranded on the Windows shell.");
 
-  if let Err(err) = target.focus() {
-    tracing::warn!("Failed to restore stranded focus: {err}");
+  match target.focus() {
+    Ok(()) => state.stranded_focus_attempts = 0,
+    Err(err) => {
+      tracing::warn!("Failed to restore stranded focus: {err}");
+
+      if state.stranded_focus_attempts >= STRANDED_FOCUS_MAX_ATTEMPTS {
+        tracing::warn!(
+          "Giving up on stranded focus after {STRANDED_FOCUS_MAX_ATTEMPTS} attempts; the shell holds the foreground until there is user input."
+        );
+      }
+    }
   }
 
   Ok(())

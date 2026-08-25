@@ -75,6 +75,15 @@ pub struct WmState {
   /// stranded focus.
   pub stranded_focus_ticks: u32,
 
+  /// Restores already attempted for the current stranded stretch.
+  ///
+  /// Windows grants foreground rights to the process that last received
+  /// input, so a restore the shell refuses keeps being refused until the
+  /// user interacts. Capping the attempts stops the poll from retrying —
+  /// and injecting an input event each time — for a call that cannot
+  /// succeed until the state changes on its own.
+  pub stranded_focus_attempts: u32,
+
   /// Whether the initial state has been populated.
   has_initialized: bool,
 
@@ -103,6 +112,7 @@ impl WmState {
       is_paused: false,
       is_focus_synced: false,
       stranded_focus_ticks: 0,
+      stranded_focus_attempts: 0,
       has_initialized: false,
       event_tx,
       exit_tx,
