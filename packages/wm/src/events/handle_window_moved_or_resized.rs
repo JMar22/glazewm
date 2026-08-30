@@ -3,11 +3,11 @@ use wm_common::{
   try_warn, ActiveDrag, ActiveDragOperation, DisplayState,
   FloatingStateConfig, FullscreenStateConfig, HideMethod, WindowState,
 };
-#[cfg(target_os = "windows")]
-use wm_platform::NativeWindowWindowsExt;
 #[cfg(target_os = "macos")]
 use wm_platform::{LengthValue, MouseButton, RectDelta};
 use wm_platform::{NativeWindow, Rect};
+#[cfg(target_os = "windows")]
+use wm_platform::{NativeWindowWindowsExt, WS_CAPTION};
 
 use crate::{
   commands::{
@@ -265,6 +265,23 @@ pub fn handle_window_moved_or_resized(
         _ => should_fullscreen,
       }
     };
+
+    // The WM's state wins over an application resizing itself to cover
+    // the workspace, so the window is queued for redraw to be
+    // re-maximized by the next platform sync.
+    #[cfg(target_os = "windows")]
+    if is_self_resize_of_maximized_fullscreen(
+      is_maximized,
+      should_fullscreen,
+      window.native().has_window_style(WS_CAPTION),
+      &window.state(),
+    ) {
+      tracing::info!("Ignoring self-resize of decorated window: {window}");
+
+      state.pending_sync.queue_container_to_redraw(window.clone());
+
+      return Ok(());
+    }
 
     // Handle a window being maximized or entering fullscreen.
     if is_maximized || should_fullscreen {
@@ -539,11 +556,109 @@ fn is_in_corner(window_frame: &Rect, monitor_rect: &Rect) -> bool {
   (is_left_corner || is_right_corner) && is_bottom_of_monitor
 }
 
+/// Gets whether a move or resize event is an application resizing itself
+/// to cover the workspace while the WM holds it in a maximized fullscreen.
+///
+/// Applications drop their caption bar when they enter their own
+/// fullscreen, so a window that still has one has not become fullscreen —
+/// it has merely resized itself to a frame that happens to cover the
+/// workspace. For example, Firefox applies its persisted window geometry
+/// shortly after startup, which can cover the workspace while the window
+/// is still decorated. Adopting that as a non-maximized fullscreen would
+/// leave the window unmaximized with no way back, since its frame keeps
+/// satisfying the fullscreen check.
+fn is_self_resize_of_maximized_fullscreen(
+  is_maximized: bool,
+  should_fullscreen: bool,
+  has_caption: bool,
+  state: &WindowState,
+) -> bool {
+  !is_maximized
+    && should_fullscreen
+    && has_caption
+    && matches!(
+      state,
+      WindowState::Fullscreen(FullscreenStateConfig {
+        maximized: true,
+        ..
+      })
+    )
+}
+
 #[cfg(test)]
 mod tests {
+  use wm_common::{FullscreenStateConfig, WindowState};
   use wm_platform::Rect;
 
-  use super::is_in_corner;
+  use super::{is_in_corner, is_self_resize_of_maximized_fullscreen};
+
+  fn maximized_fullscreen() -> WindowState {
+    WindowState::Fullscreen(FullscreenStateConfig {
+      maximized: true,
+      shown_on_top: false,
+    })
+  }
+
+  #[test]
+  fn matches_decorated_window_resizing_over_the_workspace() {
+    // A decorated window (e.g. Firefox restoring its persisted geometry)
+    // that covers the workspace has not entered its own fullscreen.
+    assert!(is_self_resize_of_maximized_fullscreen(
+      false,
+      true,
+      true,
+      &maximized_fullscreen(),
+    ));
+  }
+
+  #[test]
+  fn does_not_match_application_entering_its_own_fullscreen() {
+    // A window that sheds its caption bar is genuinely fullscreen, and
+    // must still be adopted as a non-maximized fullscreen.
+    assert!(!is_self_resize_of_maximized_fullscreen(
+      false,
+      true,
+      false,
+      &maximized_fullscreen(),
+    ));
+  }
+
+  #[test]
+  fn does_not_match_maximized_window() {
+    assert!(!is_self_resize_of_maximized_fullscreen(
+      true,
+      true,
+      true,
+      &maximized_fullscreen(),
+    ));
+  }
+
+  #[test]
+  fn does_not_match_window_away_from_the_workspace_bounds() {
+    assert!(!is_self_resize_of_maximized_fullscreen(
+      false,
+      false,
+      true,
+      &maximized_fullscreen(),
+    ));
+  }
+
+  #[test]
+  fn does_not_match_other_window_states() {
+    // Only a WM-driven maximized fullscreen has something to preserve.
+    for state in [
+      WindowState::Tiling,
+      WindowState::Minimized,
+      WindowState::Fullscreen(FullscreenStateConfig {
+        maximized: false,
+        shown_on_top: false,
+      }),
+    ] {
+      assert!(!is_self_resize_of_maximized_fullscreen(
+        false, true, true, &state,
+      ));
+    }
+  }
 
   #[test]
   fn matches_corner_positions() {
