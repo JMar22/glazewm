@@ -364,6 +364,9 @@ impl IpcServer {
       WmEvent::FocusedContainerMoved { .. } => {
         SubscribableEvent::FocusedContainerMoved
       }
+      WmEvent::FullscreenChanged { .. } => {
+        SubscribableEvent::FullscreenChanged
+      }
       WmEvent::MonitorAdded { .. } => SubscribableEvent::MonitorAdded,
       WmEvent::MonitorUpdated { .. } => SubscribableEvent::MonitorUpdated,
       WmEvent::MonitorRemoved { .. } => SubscribableEvent::MonitorRemoved,

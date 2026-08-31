@@ -1,3 +1,5 @@
+#[cfg(target_os = "windows")]
+use std::collections::HashSet;
 use std::time::Instant;
 
 use anyhow::Context;
@@ -9,7 +11,7 @@ use wm_platform::{
   Direction, Dispatcher, Display, NativeWindow, Point, Rect,
 };
 #[cfg(target_os = "windows")]
-use wm_platform::{NativeWindowWindowsExt, OpacityValue};
+use wm_platform::{NativeWindowWindowsExt, OpacityValue, WindowId};
 
 use crate::{
   commands::{
@@ -86,6 +88,16 @@ pub struct WmState {
   #[cfg(target_os = "windows")]
   pub stranded_focus_attempts: u32,
 
+  /// Windows the shell has been told are covering the taskbar.
+  ///
+  /// The shell only reacts to a mark that changes what it already holds,
+  /// so the WM has to remember what it last sent. `prev_state` cannot
+  /// answer this: it only moves when the state *discriminant* changes, so
+  /// it stays put across the fullscreen-to-maximized-fullscreen swap, and
+  /// it says nothing about a window being hidden by a workspace switch.
+  #[cfg(target_os = "windows")]
+  pub windows_marked_fullscreen: HashSet<WindowId>,
+
   /// Whether the initial state has been populated.
   has_initialized: bool,
 
@@ -117,6 +129,8 @@ impl WmState {
       stranded_focus_ticks: 0,
       #[cfg(target_os = "windows")]
       stranded_focus_attempts: 0,
+      #[cfg(target_os = "windows")]
+      windows_marked_fullscreen: HashSet::new(),
       has_initialized: false,
       event_tx,
       exit_tx,

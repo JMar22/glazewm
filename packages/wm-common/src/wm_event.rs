@@ -24,6 +24,16 @@ pub enum WmEvent {
   FocusedContainerMoved {
     focused_container: ContainerDto,
   },
+  /// A window started or stopped covering the taskbar.
+  ///
+  /// Emitted when the shell is told to drop the taskbar below a
+  /// fullscreen window, and again when it is told to bring it back. Lets
+  /// taskbar overlays follow the taskbar out of a fullscreen window's way
+  /// and back.
+  FullscreenChanged {
+    fullscreen_id: Uuid,
+    is_fullscreen: bool,
+  },
   MonitorAdded {
     added_monitor: ContainerDto,
   },

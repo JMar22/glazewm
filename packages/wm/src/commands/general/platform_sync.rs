@@ -1,4 +1,6 @@
 use anyhow::Context;
+#[cfg(any(test, target_os = "windows"))]
+use wm_common::FullscreenStateConfig;
 #[cfg(target_os = "windows")]
 use wm_common::WindowEffectConfig;
 use wm_common::{
@@ -363,27 +365,11 @@ fn redraw_containers(
       tracing::warn!("Failed to set window position: {}", err);
     }
 
-    // Whether the window is either transitioning to or from fullscreen.
-    // TODO: This check can be improved since `prev_state` can be
-    // fullscreen without it needing to be marked as not fullscreen.
+    // Tell the shell whether the window is covering the taskbar, so that
+    // it drops the taskbar below the window and raises it again
+    // afterwards.
     #[cfg(target_os = "windows")]
-    {
-      let is_transitioning_fullscreen =
-        match (window.prev_state(), window.state()) {
-          (Some(_), WindowState::Fullscreen(s)) if !s.maximized => true,
-          (Some(WindowState::Fullscreen(_)), _) => true,
-          _ => false,
-        };
-
-      if is_transitioning_fullscreen {
-        if let Err(err) = window.native().mark_fullscreen(matches!(
-          window.state(),
-          WindowState::Fullscreen(_)
-        )) {
-          tracing::warn!("Failed to mark window as fullscreen: {}", err);
-        }
-      }
-    }
+    sync_fullscreen_mark(window, is_visible, state);
 
     // Reassert removal for every redraw of a hidden cloaked window. Some
     // applications can add their taskbar tab again after GlazeWM's
@@ -411,6 +397,62 @@ fn redraw_sort_key(
   focus_order: Option<usize>,
 ) -> (bool, Option<usize>) {
   (will_be_visible, focus_order)
+}
+
+/// Gets whether a window in the given state is drawn over the taskbar.
+///
+/// Only a fullscreen window that isn't maximized covers the taskbar. A
+/// maximized one stops at the work area, which the taskbar sits outside
+/// of, so marking it would hide the taskbar behind a window that leaves
+/// room for it.
+#[cfg(any(test, target_os = "windows"))]
+fn covers_taskbar(state: &WindowState) -> bool {
+  matches!(
+    state,
+    WindowState::Fullscreen(FullscreenStateConfig {
+      maximized: false,
+      ..
+    })
+  )
+}
+
+/// Marks a window as fullscreen with the shell, or unmarks it, whenever
+/// that differs from what the shell was last told.
+///
+/// A window cloaked on a hidden workspace keeps its fullscreen frame, but
+/// covers nothing, so the mark is dropped as it hides and re-asserted as
+/// it shows. Re-asserting matters: the shell ignores a mark that repeats
+/// what it already holds, so without the drop, switching back to the
+/// workspace of a fullscreen video left the taskbar drawn over it.
+#[cfg(target_os = "windows")]
+fn sync_fullscreen_mark(
+  window: &WindowContainer,
+  is_visible: bool,
+  state: &mut WmState,
+) {
+  let window_id = window.native().id();
+  let is_fullscreen = is_visible && covers_taskbar(&window.state());
+
+  if is_fullscreen == state.windows_marked_fullscreen.contains(&window_id)
+  {
+    return;
+  }
+
+  if let Err(err) = window.native().mark_fullscreen(is_fullscreen) {
+    tracing::warn!("Failed to mark window as fullscreen: {}", err);
+    return;
+  }
+
+  if is_fullscreen {
+    state.windows_marked_fullscreen.insert(window_id);
+  } else {
+    state.windows_marked_fullscreen.remove(&window_id);
+  }
+
+  state.emit_event(WmEvent::FullscreenChanged {
+    fullscreen_id: window.id(),
+    is_fullscreen,
+  });
 }
 
 #[cfg(any(test, target_os = "windows"))]
@@ -710,9 +752,14 @@ fn apply_transparency_effect(
 
 #[cfg(test)]
 mod tests {
-  use wm_common::{DisplayState, HideMethod};
+  use wm_common::{
+    DisplayState, FloatingStateConfig, FullscreenStateConfig, HideMethod,
+    WindowState,
+  };
 
-  use super::{redraw_sort_key, should_sync_taskbar_visibility};
+  use super::{
+    covers_taskbar, redraw_sort_key, should_sync_taskbar_visibility,
+  };
 
   #[test]
   fn redraws_destination_before_hiding_outgoing_workspace() {
@@ -742,6 +789,34 @@ mod tests {
         "outgoing_focused",
       ]
     );
+  }
+
+  #[test]
+  fn only_an_unmaximized_fullscreen_covers_the_taskbar() {
+    assert!(covers_taskbar(&WindowState::Fullscreen(
+      FullscreenStateConfig {
+        maximized: false,
+        shown_on_top: false,
+      }
+    )));
+
+    // A maximized window stops at the work area, so the taskbar is still
+    // on screen beside it.
+    assert!(!covers_taskbar(&WindowState::Fullscreen(
+      FullscreenStateConfig {
+        maximized: true,
+        shown_on_top: false,
+      }
+    )));
+
+    assert!(!covers_taskbar(&WindowState::Tiling));
+    assert!(!covers_taskbar(&WindowState::Minimized));
+    assert!(!covers_taskbar(&WindowState::Floating(
+      FloatingStateConfig {
+        centered: true,
+        shown_on_top: false,
+      }
+    )));
   }
 
   #[test]

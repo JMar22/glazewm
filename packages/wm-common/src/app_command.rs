@@ -140,6 +140,7 @@ pub enum SubscribableEvent {
   BindingModesChanged,
   FocusChanged,
   FocusedContainerMoved,
+  FullscreenChanged,
   MonitorAdded,
   MonitorUpdated,
   MonitorRemoved,

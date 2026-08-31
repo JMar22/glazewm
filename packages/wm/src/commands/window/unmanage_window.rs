@@ -37,6 +37,21 @@ pub fn unmanage_window(
     unmanaged_handle: window.native().id().0 as isize,
   });
 
+  // The window is gone before it could be redrawn out of fullscreen, so
+  // the shell restores the taskbar on its own. Drop the mark to match,
+  // and tell overlays the taskbar is theirs again. Dropping it also keeps
+  // a recycled window handle from inheriting the mark.
+  #[cfg(target_os = "windows")]
+  if state
+    .windows_marked_fullscreen
+    .remove(&window.native().id())
+  {
+    state.emit_event(WmEvent::FullscreenChanged {
+      fullscreen_id: window.id(),
+      is_fullscreen: false,
+    });
+  }
+
   // Reassign focus to suitable target.
   if let Some(focus_target) = focus_target {
     set_focused_descendant(&focus_target, None);
