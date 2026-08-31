@@ -567,6 +567,7 @@ fn is_in_corner(window_frame: &Rect, monitor_rect: &Rect) -> bool {
 /// is still decorated. Adopting that as a non-maximized fullscreen would
 /// leave the window unmaximized with no way back, since its frame keeps
 /// satisfying the fullscreen check.
+#[cfg(any(test, target_os = "windows"))]
 fn is_self_resize_of_maximized_fullscreen(
   is_maximized: bool,
   should_fullscreen: bool,

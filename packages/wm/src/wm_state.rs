@@ -73,6 +73,7 @@ pub struct WmState {
   /// Used to debounce `reconcile_stranded_focus` so that the brief
   /// foreground gaps during normal window activation are not mistaken for
   /// stranded focus.
+  #[cfg(target_os = "windows")]
   pub stranded_focus_ticks: u32,
 
   /// Restores already attempted for the current stranded stretch.
@@ -82,6 +83,7 @@ pub struct WmState {
   /// user interacts. Capping the attempts stops the poll from retrying —
   /// and injecting an input event each time — for a call that cannot
   /// succeed until the state changes on its own.
+  #[cfg(target_os = "windows")]
   pub stranded_focus_attempts: u32,
 
   /// Whether the initial state has been populated.
@@ -111,7 +113,9 @@ impl WmState {
       ignored_windows: Vec::new(),
       is_paused: false,
       is_focus_synced: false,
+      #[cfg(target_os = "windows")]
       stranded_focus_ticks: 0,
+      #[cfg(target_os = "windows")]
       stranded_focus_attempts: 0,
       has_initialized: false,
       event_tx,
