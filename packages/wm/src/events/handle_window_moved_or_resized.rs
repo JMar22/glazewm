@@ -345,6 +345,21 @@ pub fn handle_window_moved_or_resized(
       return Ok(());
     }
 
+    // An application placing its own window as it starts up does not get
+    // to discard the state the window rules just gave it, so the window is
+    // queued for redraw to be re-maximized by the next platform sync.
+    #[cfg(target_os = "windows")]
+    if is_startup_placement_of_maximized_fullscreen(
+      window.native_properties().read_at,
+      &window.state(),
+    ) {
+      tracing::info!("Ignoring startup placement of window: {window}");
+
+      state.pending_sync.queue_container_to_redraw(window.clone());
+
+      return Ok(());
+    }
+
     match window.state() {
       WindowState::Fullscreen(_) => {
         // Window is no longer maximized/fullscreen and should be restored.
@@ -586,12 +601,62 @@ fn is_self_resize_of_maximized_fullscreen(
     )
 }
 
+/// How long after the WM adopts a window its own placement is read as
+/// startup placement rather than as something the user asked for.
+///
+/// Measured here with Windows Terminal, which `cmd` and `powershell` open
+/// into: it applies its persisted geometry ~185ms after the window is
+/// managed, and ~140ms after the window rules maximize it. A second
+/// clears that with room for slower applications, while staying well
+/// under the time it takes to reach for a maximize button.
+#[cfg(any(test, target_os = "windows"))]
+const STARTUP_PLACEMENT_PERIOD: std::time::Duration =
+  std::time::Duration::from_millis(1000);
+
+/// Gets whether a move or resize event is an application placing its own
+/// window just after the WM adopted it, while the WM holds it in a
+/// maximized fullscreen.
+///
+/// Applications apply their persisted geometry a moment after their
+/// window appears, which lands after the manage-time window rules have
+/// run. Adopting that as the window being restored from fullscreen throws
+/// away the state those rules chose: Windows Terminal opens maximized and
+/// then settles back to tiling a frame later.
+///
+/// Only a *maximized* fullscreen is held this way. A window the WM has in
+/// an unmaximized fullscreen is one covering the monitor on the
+/// application's own terms, and an application leaving that is not
+/// something to override.
+///
+/// The bound is what keeps the maximize button working: a restore the
+/// user asks for later arrives as the same kind of event, and is adopted.
+#[cfg(any(test, target_os = "windows"))]
+fn is_startup_placement_of_maximized_fullscreen(
+  read_at: std::time::Instant,
+  state: &WindowState,
+) -> bool {
+  read_at.elapsed() < STARTUP_PLACEMENT_PERIOD
+    && matches!(
+      state,
+      WindowState::Fullscreen(FullscreenStateConfig {
+        maximized: true,
+        ..
+      })
+    )
+}
+
 #[cfg(test)]
 mod tests {
+  use std::time::{Duration, Instant};
+
   use wm_common::{FullscreenStateConfig, WindowState};
   use wm_platform::Rect;
 
-  use super::{is_in_corner, is_self_resize_of_maximized_fullscreen};
+  use super::{
+    is_in_corner, is_self_resize_of_maximized_fullscreen,
+    is_startup_placement_of_maximized_fullscreen,
+    STARTUP_PLACEMENT_PERIOD,
+  };
 
   fn maximized_fullscreen() -> WindowState {
     WindowState::Fullscreen(FullscreenStateConfig {
@@ -610,6 +675,49 @@ mod tests {
       true,
       &maximized_fullscreen(),
     ));
+  }
+
+  #[test]
+  fn matches_placement_right_after_the_window_is_adopted() {
+    // Windows Terminal applies its persisted geometry a frame after the
+    // window rules have maximized it.
+    assert!(is_startup_placement_of_maximized_fullscreen(
+      Instant::now(),
+      &maximized_fullscreen(),
+    ));
+  }
+
+  #[test]
+  fn does_not_match_a_restore_the_user_asked_for() {
+    // The maximize button arrives as the same kind of event, so only the
+    // window's first moments are treated as startup placement.
+    let settled = Instant::now()
+      .checked_sub(STARTUP_PLACEMENT_PERIOD + Duration::from_millis(1))
+      .expect("Instant is past the settle period.");
+
+    assert!(!is_startup_placement_of_maximized_fullscreen(
+      settled,
+      &maximized_fullscreen(),
+    ));
+  }
+
+  #[test]
+  fn does_not_match_startup_placement_of_an_unmaximized_fullscreen() {
+    // A window covering the monitor on the application's own terms is
+    // left alone when the application takes it back.
+    for state in [
+      WindowState::Tiling,
+      WindowState::Minimized,
+      WindowState::Fullscreen(FullscreenStateConfig {
+        maximized: false,
+        shown_on_top: false,
+      }),
+    ] {
+      assert!(!is_startup_placement_of_maximized_fullscreen(
+        Instant::now(),
+        &state,
+      ));
+    }
   }
 
   #[test]

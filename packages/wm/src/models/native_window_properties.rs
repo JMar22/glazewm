@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use wm_platform::{NativeWindow, Rect};
 #[cfg(target_os = "windows")]
 use wm_platform::{NativeWindowWindowsExt, RectDelta};
@@ -14,6 +16,14 @@ pub struct NativeWindowProperties {
   pub is_resizable: bool,
   #[cfg(target_os = "windows")]
   pub shadow_borders: RectDelta,
+
+  /// When the WM read these properties, which is when it decided whether
+  /// to manage the window. Used to tell an application placing its own
+  /// window as it starts up from the user moving it later.
+  ///
+  /// These properties are read once per window and carried across state
+  /// changes, so this does not move for the life of the window.
+  pub read_at: Instant,
 }
 
 impl TryFrom<&NativeWindow> for NativeWindowProperties {
@@ -31,6 +41,7 @@ impl TryFrom<&NativeWindow> for NativeWindowProperties {
       is_resizable: native_window.is_resizable()?,
       #[cfg(target_os = "windows")]
       shadow_borders: native_window.shadow_borders()?,
+      read_at: Instant::now(),
     })
   }
 }
