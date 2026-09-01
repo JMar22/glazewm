@@ -9,6 +9,8 @@ use wm_platform::{NativeWindow, Rect};
 #[cfg(target_os = "windows")]
 use wm_platform::{NativeWindowWindowsExt, WS_CAPTION};
 
+#[cfg(target_os = "windows")]
+use crate::commands::general::sync_fullscreen_mark;
 use crate::{
   commands::{
     container::{flatten_split_container, move_container_within_tree},
@@ -110,6 +112,14 @@ pub fn handle_window_moved_or_resized(
     if is_minimized {
       return Ok(());
     }
+
+    // A frame that has just grown over the taskbar, or come back off it,
+    // is the shell's business whatever the WM makes of it. An application
+    // entering its own fullscreen from a maximized window keeps the
+    // native maximized flag, so the WM's state for it does not change and
+    // no redraw follows — this event is the only notice of it.
+    #[cfg(target_os = "windows")]
+    sync_fullscreen_mark(&window, state);
 
     // Detect whether the window is starting to be interactively moved or
     // resized by the user (e.g. via the window's drag handles).

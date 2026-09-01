@@ -1,6 +1,4 @@
 use anyhow::Context;
-#[cfg(any(test, target_os = "windows"))]
-use wm_common::FullscreenStateConfig;
 #[cfg(target_os = "windows")]
 use wm_common::WindowEffectConfig;
 use wm_common::{
@@ -369,7 +367,7 @@ fn redraw_containers(
     // it drops the taskbar below the window and raises it again
     // afterwards.
     #[cfg(target_os = "windows")]
-    sync_fullscreen_mark(window, is_visible, state);
+    sync_fullscreen_mark(window, state);
 
     // Reassert removal for every redraw of a hidden cloaked window. Some
     // applications can add their taskbar tab again after GlazeWM's
@@ -399,21 +397,25 @@ fn redraw_sort_key(
   (will_be_visible, focus_order)
 }
 
-/// Gets whether a window in the given state is drawn over the taskbar.
+/// Gets whether a window's frame is drawn over the taskbar.
 ///
-/// Only a fullscreen window that isn't maximized covers the taskbar. A
-/// maximized one stops at the work area, which the taskbar sits outside
-/// of, so marking it would hide the taskbar behind a window that leaves
-/// room for it.
+/// This is a question about geometry, not about window state. An
+/// application entering its own fullscreen from a maximized window keeps
+/// the native maximized flag — Firefox does on F11 — so the WM goes on
+/// holding it in a *maximized* fullscreen while its frame grows from the
+/// working area to the whole monitor. The taskbar lives in the difference
+/// between those two rects, so that is what gets measured.
 #[cfg(any(test, target_os = "windows"))]
-fn covers_taskbar(state: &WindowState) -> bool {
-  matches!(
-    state,
-    WindowState::Fullscreen(FullscreenStateConfig {
-      maximized: false,
-      ..
-    })
-  )
+fn covers_taskbar(
+  frame: &Rect,
+  bounds: &Rect,
+  working_area: &Rect,
+) -> bool {
+  // A monitor whose working area is its full bounds has no taskbar strip
+  // to cover: it is on another monitor, or set to auto-hide.
+  bounds != working_area
+    // Inset so that a frame matching the monitor exactly still counts.
+    && frame.contains_rect(&bounds.inset(1))
 }
 
 /// Marks a window as fullscreen with the shell, or unmarks it, whenever
@@ -424,14 +426,34 @@ fn covers_taskbar(state: &WindowState) -> bool {
 /// it shows. Re-asserting matters: the shell ignores a mark that repeats
 /// what it already holds, so without the drop, switching back to the
 /// workspace of a fullscreen video left the taskbar drawn over it.
+///
+/// Called both when a window is redrawn, which is what changes whether it
+/// is on screen, and when one is moved or resized, which is what changes
+/// whether it covers the taskbar. An application entering its own
+/// fullscreen only does the latter: the WM's state for the window comes
+/// out of it unchanged, so no redraw follows.
 #[cfg(target_os = "windows")]
-fn sync_fullscreen_mark(
+pub(crate) fn sync_fullscreen_mark(
   window: &WindowContainer,
-  is_visible: bool,
   state: &mut WmState,
 ) {
+  let Some(monitor) = window.monitor() else {
+    return;
+  };
+
+  let monitor_properties = monitor.native_properties();
+  let is_visible = matches!(
+    window.display_state(),
+    DisplayState::Showing | DisplayState::Shown
+  );
+
   let window_id = window.native().id();
-  let is_fullscreen = is_visible && covers_taskbar(&window.state());
+  let is_fullscreen = is_visible
+    && covers_taskbar(
+      &window.native_properties().frame,
+      &monitor_properties.bounds,
+      &monitor_properties.working_area,
+    );
 
   if is_fullscreen == state.windows_marked_fullscreen.contains(&window_id)
   {
@@ -752,10 +774,8 @@ fn apply_transparency_effect(
 
 #[cfg(test)]
 mod tests {
-  use wm_common::{
-    DisplayState, FloatingStateConfig, FullscreenStateConfig, HideMethod,
-    WindowState,
-  };
+  use wm_common::{DisplayState, HideMethod};
+  use wm_platform::Rect;
 
   use super::{
     covers_taskbar, redraw_sort_key, should_sync_taskbar_visibility,
@@ -791,32 +811,58 @@ mod tests {
     );
   }
 
+  // The measurements below are from this machine: a 2880x1800 monitor
+  // with an 80px taskbar, a Firefox window maximized and then sent
+  // fullscreen with F11. The maximized frame overshoots the monitor on
+  // the sides by its invisible resize borders, and still stops short of
+  // the bottom; the fullscreen one is the monitor exactly.
+  fn monitor_bounds() -> Rect {
+    Rect::from_ltrb(0, 0, 2880, 1800)
+  }
+
+  fn working_area() -> Rect {
+    Rect::from_ltrb(0, 0, 2880, 1720)
+  }
+
   #[test]
-  fn only_an_unmaximized_fullscreen_covers_the_taskbar() {
-    assert!(covers_taskbar(&WindowState::Fullscreen(
-      FullscreenStateConfig {
-        maximized: false,
-        shown_on_top: false,
-      }
-    )));
+  fn a_frame_over_the_taskbar_strip_covers_it() {
+    assert!(covers_taskbar(
+      &monitor_bounds(),
+      &monitor_bounds(),
+      &working_area(),
+    ));
+  }
 
-    // A maximized window stops at the work area, so the taskbar is still
-    // on screen beside it.
-    assert!(!covers_taskbar(&WindowState::Fullscreen(
-      FullscreenStateConfig {
-        maximized: true,
-        shown_on_top: false,
-      }
-    )));
+  #[test]
+  fn a_maximized_frame_does_not_cover_the_taskbar() {
+    // Maximized: past the monitor on the sides, short of it at the
+    // bottom. This is the case that made a state-based check wrong — the
+    // WM has such a window in a *maximized* fullscreen either way.
+    assert!(!covers_taskbar(
+      &Rect::from_ltrb(-14, -14, 2894, 1734),
+      &monitor_bounds(),
+      &working_area(),
+    ));
+  }
 
-    assert!(!covers_taskbar(&WindowState::Tiling));
-    assert!(!covers_taskbar(&WindowState::Minimized));
-    assert!(!covers_taskbar(&WindowState::Floating(
-      FloatingStateConfig {
-        centered: true,
-        shown_on_top: false,
-      }
-    )));
+  #[test]
+  fn a_window_inside_the_working_area_does_not_cover_the_taskbar() {
+    assert!(!covers_taskbar(
+      &Rect::from_ltrb(40, 120, 2840, 1680),
+      &monitor_bounds(),
+      &working_area(),
+    ));
+  }
+
+  #[test]
+  fn nothing_covers_a_taskbar_that_reserves_no_space() {
+    // An auto-hidden taskbar leaves the whole monitor as working area, so
+    // a maximized window covers the monitor without covering anything.
+    assert!(!covers_taskbar(
+      &monitor_bounds(),
+      &monitor_bounds(),
+      &monitor_bounds(),
+    ));
   }
 
   #[test]
