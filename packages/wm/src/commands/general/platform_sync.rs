@@ -418,6 +418,38 @@ fn covers_taskbar(
     && frame.contains_rect(&bounds.inset(1))
 }
 
+/// Gets whether a window has already placed itself over the whole monitor.
+///
+/// An application in its own fullscreen has put its frame exactly where
+/// the WM would put it. Re-applying the WM's own rect to such a window is
+/// not the no-op it looks like: the rect carries the invisible resize
+/// border back from the window's cached shadow borders, which the
+/// application dropped on the way into fullscreen. Measured on a
+/// fullscreen video, a frame of `0,0,2880,1800` came back from a workspace
+/// switch as `-11,0,2891,1811` — off the monitor's origin and past its far
+/// edge, so what the window draws is shifted and cropped by the border
+/// width.
+///
+/// Nothing about such a window needs moving, so nothing is moved.
+#[cfg(any(test, target_os = "windows"))]
+fn fills_monitor(frame: &Rect, bounds: &Rect) -> bool {
+  // Inset so that a frame matching the monitor exactly still counts.
+  frame.contains_rect(&bounds.inset(1))
+}
+
+/// Gets whether a window is one the WM should leave where it is: it is in
+/// a fullscreen state and has already taken its whole monitor.
+#[cfg(target_os = "windows")]
+fn keeps_own_fullscreen_frame(window: &WindowContainer) -> bool {
+  matches!(window.state(), WindowState::Fullscreen(_))
+    && window.monitor().is_some_and(|monitor| {
+      fills_monitor(
+        &window.native_properties().frame,
+        &monitor.native_properties().bounds,
+      )
+    })
+}
+
 /// Marks a window as fullscreen with the shell, or unmarks it, whenever
 /// that differs from what the shell was last told.
 ///
@@ -548,26 +580,30 @@ fn reposition_window(
     {
       use wm_platform::{
         SWP_ASYNCWINDOWPOS, SWP_FRAMECHANGED, SWP_NOACTIVATE,
-        SWP_NOCOPYBITS, SWP_NOSENDCHANGING, WS_MAXIMIZEBOX,
+        SWP_NOCOPYBITS, SWP_NOMOVE, SWP_NOSENDCHANGING, SWP_NOSIZE,
+        WS_MAXIMIZEBOX,
       };
+
+      let keeps_own_frame = keeps_own_fullscreen_frame(window);
 
       // Restore window if it's minimized/maximized and shouldn't be. This
       // is needed to be able to move and resize it.
-      let should_restore = match &window.state() {
-        // Need to restore window if transitioning from maximized
-        // fullscreen to non-maximized fullscreen.
-        WindowState::Fullscreen(fullscreen) => {
-          !fullscreen.maximized && window.native().is_maximized()?
-        }
-        // No need to restore window if it'll be minimized. Transitioning
-        // from maximized to minimized works without having to
-        // restore.
-        WindowState::Minimized => false,
-        _ => {
-          window.native().is_minimized()?
-            || window.native().is_maximized()?
-        }
-      };
+      let should_restore = !keeps_own_frame
+        && match &window.state() {
+          // Need to restore window if transitioning from maximized
+          // fullscreen to non-maximized fullscreen.
+          WindowState::Fullscreen(fullscreen) => {
+            !fullscreen.maximized && window.native().is_maximized()?
+          }
+          // No need to restore window if it'll be minimized. Transitioning
+          // from maximized to minimized works without having to
+          // restore.
+          WindowState::Minimized => false,
+          _ => {
+            window.native().is_minimized()?
+              || window.native().is_maximized()?
+          }
+        };
 
       if should_restore {
         // Restoring to position has the same effect as `ShowWindow` with
@@ -580,6 +616,11 @@ fn reposition_window(
         | SWP_NOSENDCHANGING
         | SWP_ASYNCWINDOWPOS;
 
+      // The call still runs, for its z-order half.
+      if keeps_own_frame {
+        swp_flags |= SWP_NOMOVE | SWP_NOSIZE;
+      }
+
       match &window.state() {
         WindowState::Minimized => {
           if !window.native().is_minimized()? {
@@ -590,14 +631,18 @@ fn reposition_window(
           if fullscreen.maximized
             && window.native().has_window_style(WS_MAXIMIZEBOX) =>
         {
-          if !window.native().is_maximized()? {
+          // Maximizing a window that is drawing over the whole monitor on
+          // its own terms would take it back out of that.
+          if !keeps_own_frame && !window.native().is_maximized()? {
             window.native().maximize()?;
           }
 
           window.native().set_window_pos(z_order, &rect, swp_flags)?;
         }
         _ => {
-          swp_flags |= SWP_FRAMECHANGED;
+          if !keeps_own_frame {
+            swp_flags |= SWP_FRAMECHANGED;
+          }
 
           window.native().set_window_pos(z_order, &rect, swp_flags)?;
 
@@ -778,7 +823,8 @@ mod tests {
   use wm_platform::Rect;
 
   use super::{
-    covers_taskbar, redraw_sort_key, should_sync_taskbar_visibility,
+    covers_taskbar, fills_monitor, redraw_sort_key,
+    should_sync_taskbar_visibility,
   };
 
   #[test]
@@ -915,6 +961,53 @@ mod tests {
       assert!(
         !covers_taskbar(&bounds, &bounds, &bounds),
         "monitor with no reserved strip: {bounds:?}",
+      );
+    }
+  }
+
+  #[test]
+  fn a_window_over_the_whole_monitor_keeps_its_own_frame() {
+    for (bounds, _) in monitors() {
+      assert!(
+        fills_monitor(&bounds, &bounds),
+        "frame at the monitor's own bounds: {bounds:?}",
+      );
+
+      // What the WM would otherwise re-apply: its rect grown by the
+      // window's cached resize border, which is where the drift came from.
+      assert!(
+        fills_monitor(&bounds.inset(-RESIZE_BORDER), &bounds),
+        "frame past the monitor's bounds: {bounds:?}",
+      );
+    }
+  }
+
+  #[test]
+  fn a_window_short_of_the_monitor_is_still_placed_by_the_wm() {
+    for (bounds, working_area) in monitors() {
+      // A maximized window stops at the taskbar, so the WM still owns it.
+      assert!(
+        !fills_monitor(&maximized_frame(&working_area), &bounds),
+        "maximized frame on {bounds:?}",
+      );
+
+      assert!(
+        !fills_monitor(&working_area, &bounds),
+        "frame filling the working area of {bounds:?}",
+      );
+
+      // A window fullscreen on a different monitor does not count as
+      // having placed itself on this one.
+      let elsewhere = Rect::from_ltrb(
+        bounds.left + bounds.width(),
+        bounds.top,
+        bounds.right + bounds.width(),
+        bounds.bottom,
+      );
+
+      assert!(
+        !fills_monitor(&elsewhere, &bounds),
+        "frame on the neighbouring monitor of {bounds:?}",
       );
     }
   }
