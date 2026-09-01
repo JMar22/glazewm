@@ -811,58 +811,109 @@ mod tests {
     );
   }
 
-  // The measurements below are from this machine: a 2880x1800 monitor
-  // with an 80px taskbar, a Firefox window maximized and then sent
-  // fullscreen with F11. The maximized frame overshoots the monitor on
-  // the sides by its invisible resize borders, and still stops short of
-  // the bottom; the fullscreen one is the monitor exactly.
-  fn monitor_bounds() -> Rect {
-    Rect::from_ltrb(0, 0, 2880, 1800)
+  /// Width of the invisible resize border Windows lays outside a window's
+  /// visible frame. The exact value follows the DPI; what matters to the
+  /// check is that a maximized frame is grown by it on every side, which
+  /// is why such a frame overshoots the monitor on the free sides while
+  /// still stopping at the strip the taskbar reserves.
+  const RESIZE_BORDER: i32 = 13;
+
+  /// Where Windows puts a window maximized on a monitor with this working
+  /// area.
+  fn maximized_frame(working_area: &Rect) -> Rect {
+    working_area.inset(-RESIZE_BORDER)
   }
 
-  fn working_area() -> Rect {
-    Rect::from_ltrb(0, 0, 2880, 1720)
+  /// Monitors to check the rule against, as (bounds, working area). The
+  /// first is this machine, where the behaviour was measured: a 2880x1800
+  /// monitor at 2x with an 80px taskbar along the bottom, on which a
+  /// maximized Firefox sits at (-13, -13, 2893, 1733) and F11 takes it to
+  /// (0, 0, 2880, 1800). The rest vary what the check must not depend on:
+  /// which edge reserves the strip, how thick it is, the monitor's
+  /// resolution, and whether its origin is (0, 0).
+  fn monitors() -> [(Rect, Rect); 6] {
+    [
+      (
+        Rect::from_ltrb(0, 0, 2880, 1800),
+        Rect::from_ltrb(0, 0, 2880, 1720),
+      ),
+      (
+        Rect::from_ltrb(0, 0, 2880, 1800),
+        Rect::from_ltrb(0, 80, 2880, 1800),
+      ),
+      (
+        Rect::from_ltrb(0, 0, 2880, 1800),
+        Rect::from_ltrb(120, 0, 2880, 1800),
+      ),
+      (
+        Rect::from_ltrb(0, 0, 2880, 1800),
+        Rect::from_ltrb(0, 0, 2760, 1800),
+      ),
+      (
+        Rect::from_ltrb(0, 0, 1920, 1080),
+        Rect::from_ltrb(0, 0, 1920, 1032),
+      ),
+      (
+        Rect::from_ltrb(-1920, -120, 0, 960),
+        Rect::from_ltrb(-1920, -120, 0, 912),
+      ),
+    ]
   }
 
   #[test]
-  fn a_frame_over_the_taskbar_strip_covers_it() {
-    assert!(covers_taskbar(
-      &monitor_bounds(),
-      &monitor_bounds(),
-      &working_area(),
-    ));
+  fn a_frame_at_the_monitor_bounds_covers_the_taskbar() {
+    for (bounds, working_area) in monitors() {
+      assert!(
+        covers_taskbar(&bounds, &bounds, &working_area),
+        "frame at the monitor's own bounds: {bounds:?}",
+      );
+
+      // An application that keeps its resize borders on the way into
+      // fullscreen overshoots the monitor, which covers it just as well.
+      assert!(
+        covers_taskbar(
+          &bounds.inset(-RESIZE_BORDER),
+          &bounds,
+          &working_area
+        ),
+        "frame past the monitor's bounds: {bounds:?}",
+      );
+    }
   }
 
   #[test]
   fn a_maximized_frame_does_not_cover_the_taskbar() {
-    // Maximized: past the monitor on the sides, short of it at the
-    // bottom. This is the case that made a state-based check wrong — the
-    // WM has such a window in a *maximized* fullscreen either way.
-    assert!(!covers_taskbar(
-      &Rect::from_ltrb(-14, -14, 2894, 1734),
-      &monitor_bounds(),
-      &working_area(),
-    ));
-  }
+    // Past the monitor on the free sides, stopping at the reserved strip.
+    // This is the case a state-based check got wrong: the WM holds such a
+    // window in a maximized fullscreen either way, so only the frame
+    // tells the two apart.
+    for (bounds, working_area) in monitors() {
+      assert!(
+        !covers_taskbar(
+          &maximized_frame(&working_area),
+          &bounds,
+          &working_area
+        ),
+        "maximized frame on {bounds:?}",
+      );
 
-  #[test]
-  fn a_window_inside_the_working_area_does_not_cover_the_taskbar() {
-    assert!(!covers_taskbar(
-      &Rect::from_ltrb(40, 120, 2840, 1680),
-      &monitor_bounds(),
-      &working_area(),
-    ));
+      assert!(
+        !covers_taskbar(&working_area, &bounds, &working_area),
+        "frame filling the working area of {bounds:?}",
+      );
+    }
   }
 
   #[test]
   fn nothing_covers_a_taskbar_that_reserves_no_space() {
     // An auto-hidden taskbar leaves the whole monitor as working area, so
-    // a maximized window covers the monitor without covering anything.
-    assert!(!covers_taskbar(
-      &monitor_bounds(),
-      &monitor_bounds(),
-      &monitor_bounds(),
-    ));
+    // a window covering the monitor covers nothing that was on screen.
+    for (bounds, _) in monitors() {
+      assert!(
+        !covers_taskbar(&bounds, &bounds, &bounds),
+        "monitor with no reserved strip: {bounds:?}",
+      );
+    }
   }
 
   #[test]
