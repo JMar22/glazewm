@@ -812,10 +812,10 @@ mod tests {
   }
 
   /// Width of the invisible resize border Windows lays outside a window's
-  /// visible frame. The exact value follows the DPI; what matters to the
-  /// check is that a maximized frame is grown by it on every side, which
-  /// is why such a frame overshoots the monitor on the free sides while
-  /// still stopping at the strip the taskbar reserves.
+  /// visible frame. The real value follows the monitor's DPI; what
+  /// matters to the check is that a maximized frame is grown by it on
+  /// every side, which is why such a frame overshoots the monitor on the
+  /// free sides while still stopping at the strip the taskbar reserves.
   const RESIZE_BORDER: i32 = 13;
 
   /// Where Windows puts a window maximized on a monitor with this working
@@ -824,35 +824,38 @@ mod tests {
     working_area.inset(-RESIZE_BORDER)
   }
 
-  /// Monitors to check the rule against, as (bounds, working area). The
-  /// first is this machine, where the behaviour was measured: a 2880x1800
-  /// monitor at 2x with an 80px taskbar along the bottom, on which a
-  /// maximized Firefox sits at (-13, -13, 2893, 1733) and F11 takes it to
-  /// (0, 0, 2880, 1800). The rest vary what the check must not depend on:
-  /// which edge reserves the strip, how thick it is, the monitor's
-  /// resolution, and whether its origin is (0, 0).
+  /// Monitors to check the rule against, as (bounds, working area).
+  ///
+  /// Between them they vary everything the rule must not depend on: which
+  /// edge reserves a strip for the taskbar, how thick it is, the
+  /// monitor's resolution, and whether its origin is (0, 0).
   fn monitors() -> [(Rect, Rect); 6] {
     [
-      (
-        Rect::from_ltrb(0, 0, 2880, 1800),
-        Rect::from_ltrb(0, 0, 2880, 1720),
-      ),
-      (
-        Rect::from_ltrb(0, 0, 2880, 1800),
-        Rect::from_ltrb(0, 80, 2880, 1800),
-      ),
-      (
-        Rect::from_ltrb(0, 0, 2880, 1800),
-        Rect::from_ltrb(120, 0, 2880, 1800),
-      ),
-      (
-        Rect::from_ltrb(0, 0, 2880, 1800),
-        Rect::from_ltrb(0, 0, 2760, 1800),
-      ),
+      // Taskbar along the bottom, the usual arrangement.
       (
         Rect::from_ltrb(0, 0, 1920, 1080),
         Rect::from_ltrb(0, 0, 1920, 1032),
       ),
+      // The same edge on a larger monitor with a thicker strip.
+      (
+        Rect::from_ltrb(0, 0, 2560, 1440),
+        Rect::from_ltrb(0, 0, 2560, 1380),
+      ),
+      // The other three edges.
+      (
+        Rect::from_ltrb(0, 0, 1920, 1080),
+        Rect::from_ltrb(0, 60, 1920, 1080),
+      ),
+      (
+        Rect::from_ltrb(0, 0, 1920, 1080),
+        Rect::from_ltrb(96, 0, 1920, 1080),
+      ),
+      (
+        Rect::from_ltrb(0, 0, 3840, 2160),
+        Rect::from_ltrb(0, 0, 3720, 2160),
+      ),
+      // A monitor left of and above the primary one, so that its bounds
+      // are negative on both axes.
       (
         Rect::from_ltrb(-1920, -120, 0, 960),
         Rect::from_ltrb(-1920, -120, 0, 912),
