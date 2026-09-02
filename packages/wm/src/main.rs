@@ -30,8 +30,13 @@ use wm_platform::{
 };
 
 use crate::{
-  commands::general::reconcile_stranded_focus, ipc_server::IpcServer,
-  sys_tray::SystemTray, user_config::UserConfig, wm::WindowManager,
+  commands::general::{
+    reconcile_stranded_focus, reconcile_stranded_taskbar,
+  },
+  ipc_server::IpcServer,
+  sys_tray::SystemTray,
+  user_config::UserConfig,
+  wm::WindowManager,
 };
 
 mod commands;
@@ -193,6 +198,16 @@ async fn start_wm(
   focus_reconcile_interval
     .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
+  // Create an interval for putting the taskbar back behind a fullscreen
+  // window after something raises it. Kept short because the taskbar is
+  // drawn over the window until it fires, and the check costs nothing
+  // while no window is covering the taskbar, which is nearly all of the
+  // time.
+  let mut taskbar_reconcile_interval =
+    tokio::time::interval(Duration::from_millis(500));
+  taskbar_reconcile_interval
+    .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
   loop {
     let res = tokio::select! {
       _ = signal::ctrl_c() => {
@@ -225,6 +240,9 @@ async fn start_wm(
       }
       _ = focus_reconcile_interval.tick() => {
         reconcile_stranded_focus(&mut wm.state, &config)
+      },
+      _ = taskbar_reconcile_interval.tick() => {
+        reconcile_stranded_taskbar(&wm.state)
       },
       _ = cleanup_interval.tick() => {
         if wm.state.is_paused {

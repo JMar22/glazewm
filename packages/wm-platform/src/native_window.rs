@@ -255,6 +255,16 @@ pub trait NativeWindowWindowsExt {
   /// This method is only available on Windows.
   fn mark_fullscreen(&self, fullscreen: bool) -> crate::Result<()>;
 
+  /// Gets the window directly above this one in the z-order.
+  ///
+  /// Returns `None` once the top of the stack is reached, so repeated
+  /// calls walk everything drawn over this window.
+  ///
+  /// # Platform-specific
+  ///
+  /// This method is only available on Windows.
+  fn window_above(&self) -> crate::Result<Option<crate::NativeWindow>>;
+
   /// Adds or removes the window from the native taskbar.
   ///
   /// Cloaked windows are normally always shown in the taskbar, but can be
@@ -386,6 +396,10 @@ impl NativeWindowWindowsExt for NativeWindow {
 
   fn mark_fullscreen(&self, fullscreen: bool) -> crate::Result<()> {
     self.inner.mark_fullscreen(fullscreen)
+  }
+
+  fn window_above(&self) -> crate::Result<Option<crate::NativeWindow>> {
+    self.inner.window_above()
   }
 
   fn set_taskbar_visibility(&self, visible: bool) -> crate::Result<()> {

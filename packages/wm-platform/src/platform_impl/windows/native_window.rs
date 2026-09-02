@@ -28,9 +28,9 @@ use windows::{
         IsZoomed, SendNotifyMessageW, SetForegroundWindow,
         SetLayeredWindowAttributes, SetWindowLongPtrW, SetWindowPlacement,
         SetWindowPos, ShowWindowAsync, WindowFromPoint, GA_ROOT,
-        GWL_EXSTYLE, GWL_STYLE, GW_OWNER, HWND_NOTOPMOST, HWND_TOP,
-        HWND_TOPMOST, LAYERED_WINDOW_ATTRIBUTES_FLAGS, LWA_ALPHA,
-        LWA_COLORKEY, SET_WINDOW_POS_FLAGS, SWP_ASYNCWINDOWPOS,
+        GWL_EXSTYLE, GWL_STYLE, GW_HWNDPREV, GW_OWNER, HWND_NOTOPMOST,
+        HWND_TOP, HWND_TOPMOST, LAYERED_WINDOW_ATTRIBUTES_FLAGS,
+        LWA_ALPHA, LWA_COLORKEY, SET_WINDOW_POS_FLAGS, SWP_ASYNCWINDOWPOS,
         SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOCOPYBITS, SWP_NOMOVE,
         SWP_NOOWNERZORDER, SWP_NOSENDCHANGING, SWP_NOSIZE, SWP_NOZORDER,
         SWP_SHOWWINDOW, SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE,
@@ -518,6 +518,16 @@ impl NativeWindow {
         Ok(())
       })
     })
+  }
+
+  /// Implements [`NativeWindowWindowsExt::window_above`].
+  #[allow(clippy::unnecessary_wraps)]
+  pub(crate) fn window_above(
+    &self,
+  ) -> crate::Result<Option<crate::NativeWindow>> {
+    let handle = unsafe { GetWindow(self.hwnd(), GW_HWNDPREV) };
+
+    Ok((handle.0 != 0).then(|| NativeWindow::new(handle.0).into()))
   }
 
   /// Implements [`NativeWindowWindowsExt::set_taskbar_visibility`].

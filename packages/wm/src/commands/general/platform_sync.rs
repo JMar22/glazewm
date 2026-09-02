@@ -450,6 +450,30 @@ fn keeps_own_fullscreen_frame(window: &WindowContainer) -> bool {
     })
 }
 
+/// Gets whether a window is on screen and drawn over its monitor's
+/// taskbar.
+///
+/// This is what the shell is told, and so also what has to still hold
+/// before a lost mark is worth re-asserting.
+#[cfg(target_os = "windows")]
+pub(crate) fn is_covering_taskbar(window: &WindowContainer) -> bool {
+  let is_visible = matches!(
+    window.display_state(),
+    DisplayState::Showing | DisplayState::Shown
+  );
+
+  is_visible
+    && window.monitor().is_some_and(|monitor| {
+      let monitor_properties = monitor.native_properties();
+
+      covers_taskbar(
+        &window.native_properties().frame,
+        &monitor_properties.bounds,
+        &monitor_properties.working_area,
+      )
+    })
+}
+
 /// Marks a window as fullscreen with the shell, or unmarks it, whenever
 /// that differs from what the shell was last told.
 ///
@@ -469,23 +493,8 @@ pub(crate) fn sync_fullscreen_mark(
   window: &WindowContainer,
   state: &mut WmState,
 ) {
-  let Some(monitor) = window.monitor() else {
-    return;
-  };
-
-  let monitor_properties = monitor.native_properties();
-  let is_visible = matches!(
-    window.display_state(),
-    DisplayState::Showing | DisplayState::Shown
-  );
-
   let window_id = window.native().id();
-  let is_fullscreen = is_visible
-    && covers_taskbar(
-      &window.native_properties().frame,
-      &monitor_properties.bounds,
-      &monitor_properties.working_area,
-    );
+  let is_fullscreen = is_covering_taskbar(window);
 
   if is_fullscreen == state.windows_marked_fullscreen.contains(&window_id)
   {
