@@ -15,7 +15,7 @@ use tracing::info;
 use wm_common::DisplayState;
 #[cfg(target_os = "windows")]
 use wm_platform::{
-  DispatcherExtWindows, NativeWindow, NativeWindowWindowsExt,
+  Dispatcher, DispatcherExtWindows, NativeWindow, NativeWindowWindowsExt,
 };
 
 #[cfg(target_os = "windows")]
@@ -118,6 +118,14 @@ pub fn reconcile_stranded_focus(
     return Ok(());
   }
 
+  // Checked only once focus already looks stranded, which is rare, so the
+  // window enumeration below costs nothing on the common path.
+  if shell_popup_is_open(&state.dispatcher) {
+    state.stranded_focus_ticks = 0;
+    state.stranded_focus_attempts = 0;
+    return Ok(());
+  }
+
   state.stranded_focus_ticks += 1;
   if state.stranded_focus_ticks < STRANDED_FOCUS_TICKS_BEFORE_RESTORE {
     return Ok(());
@@ -175,6 +183,43 @@ pub(crate) fn is_stranded_focus_target(
     || !native_window.is_visible().unwrap_or(true)
 }
 
+/// Window class of the popup the shell draws its menus into.
+///
+/// Windows 11 builds the Win+X menu -- the one reached by right-clicking
+/// Start, with "Shut down or sign out" and its submenu -- out of XAML
+/// popups rather than the classic menus of earlier versions. Nothing about
+/// it looks like a menu to the window manager: the foreground stays on
+/// `Shell_TrayWnd`, and no thread in the shell enters menu mode, so
+/// [`DispatcherExtWindows::is_menu_open`] cannot see it. The popup window
+/// itself is the only evidence that the menu is on screen.
+#[cfg(any(test, target_os = "windows"))]
+pub(crate) const SHELL_POPUP_WINDOW_CLASS: &str =
+  "Xaml_WindowedPopupClass";
+
+/// Whether the shell is showing a popup menu.
+///
+/// The shell destroys these windows as its menus close, so this is only
+/// true while one is on screen. Focus left on the taskbar with no popup
+/// open is the stranding this module exists to recover from, and is
+/// unaffected.
+///
+/// Restricted to the shell's own popups: the class belongs to XAML rather
+/// than to the shell, so any application built on it would otherwise be
+/// able to hold focus recovery off indefinitely.
+#[cfg(target_os = "windows")]
+pub(crate) fn shell_popup_is_open(dispatcher: &Dispatcher) -> bool {
+  dispatcher.visible_windows().is_ok_and(|windows| {
+    windows.iter().any(|window| {
+      window
+        .class_name()
+        .is_ok_and(|class_name| class_name == SHELL_POPUP_WINDOW_CLASS)
+        && window.process_name().is_ok_and(|process_name| {
+          process_name.eq_ignore_ascii_case("explorer")
+        })
+    })
+  })
+}
+
 /// Whether a focus event target is the desktop or the taskbar frame.
 #[cfg(target_os = "windows")]
 pub(crate) fn is_shell_focus_target(native_window: &NativeWindow) -> bool {
@@ -192,7 +237,17 @@ pub(crate) fn is_taskbar_window_class(class_name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-  use super::is_taskbar_window_class;
+  use super::{is_taskbar_window_class, SHELL_POPUP_WINDOW_CLASS};
+
+  #[test]
+  fn a_shell_popup_is_not_itself_a_taskbar() {
+    // The two are read off different windows and mean opposite things: the
+    // taskbar holding the foreground is what makes focus look stranded,
+    // while a popup being on screen is what says it is not. Conflating
+    // them would make an open Win+X menu its own justification for
+    // stealing focus away from it.
+    assert!(!is_taskbar_window_class(SHELL_POPUP_WINDOW_CLASS));
+  }
 
   #[test]
   fn recognizes_only_taskbar_window_classes() {

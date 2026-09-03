@@ -6,7 +6,9 @@ use wm_platform::DispatcherExtWindows;
 use wm_platform::NativeWindow;
 
 #[cfg(target_os = "windows")]
-use crate::commands::general::is_shell_focus_target;
+use crate::commands::general::{
+  is_shell_focus_target, shell_popup_is_open,
+};
 use crate::{
   commands::{
     container::set_focused_descendant, window::run_window_rules,
@@ -192,7 +194,13 @@ fn schedule_shell_focus_restore(
       // the retries run soon enough after the click to catch a menu the
       // user has only just opened. Checked on each pass rather than once
       // up front, since the menu can open after the restore is scheduled.
-      if dispatcher.is_menu_open().unwrap_or(false) {
+      //
+      // Both kinds of menu have to be asked about separately: the classic
+      // ones put a thread into menu mode, while the shell's own menus are
+      // XAML popups that do not.
+      if dispatcher.is_menu_open().unwrap_or(false)
+        || shell_popup_is_open(&dispatcher)
+      {
         return;
       }
 
