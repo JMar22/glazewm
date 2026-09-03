@@ -70,6 +70,23 @@ pub fn reconcile_stranded_focus(
     return Ok(());
   }
 
+  // An open menu holds the foreground on the window that owns it, and that
+  // owner is typically an invisible message-only window -- a tray icon's
+  // window, or the hidden owner behind the Win+X menu. That reads as
+  // stranded focus by every test below, so without this the poll restores
+  // focus out from under a menu the user is working their way through,
+  // roughly a second and a half after it opens. Restoring focus also sends
+  // input to defeat the foreground lock, which dismisses the menu
+  // outright.
+  //
+  // A failed query is treated as no menu so that a broken check degrades
+  // to the previous behaviour rather than disabling recovery.
+  if state.dispatcher.is_menu_open().unwrap_or(false) {
+    state.stranded_focus_ticks = 0;
+    state.stranded_focus_attempts = 0;
+    return Ok(());
+  }
+
   // Only restore to a window the user can actually see. A hidden or
   // minimized target means there is nothing to return focus to.
   let target = state

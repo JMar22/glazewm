@@ -42,10 +42,12 @@ use windows::{
         SHELLEXECUTEINFOW,
       },
       WindowsAndMessaging::{
-        GetCursorPos, MessageBoxW, SetCursorPos, SystemParametersInfoW,
-        ANIMATIONINFO, MB_ICONERROR, MB_OK, MB_SYSTEMMODAL,
-        SPIF_SENDCHANGE, SPIF_UPDATEINIFILE, SPI_GETANIMATION,
-        SPI_SETANIMATION, SW_HIDE, SW_NORMAL,
+        GetCursorPos, GetGUIThreadInfo, MessageBoxW, SetCursorPos,
+        SystemParametersInfoW, ANIMATIONINFO, GUITHREADINFO,
+        GUI_CARETBLINKING, GUI_INMENUMODE, GUI_INMOVESIZE,
+        GUI_POPUPMENUMODE, GUI_SYSTEMMENUMODE, MB_ICONERROR, MB_OK,
+        MB_SYSTEMMODAL, SPIF_SENDCHANGE, SPIF_UPDATEINIFILE,
+        SPI_GETANIMATION, SPI_SETANIMATION, SW_HIDE, SW_NORMAL,
         SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS,
       },
     },
@@ -162,6 +164,19 @@ pub trait DispatcherExtWindows {
   ///
   /// This method is only available on Windows.
   fn is_session_locked(&self) -> crate::Result<bool>;
+
+  /// Gets whether a menu is currently open anywhere on the desktop.
+  ///
+  /// Covers the classic menus the shell still uses: tray icon menus, the
+  /// taskbar and desktop context menus, and the Win+X menu with its "Shut
+  /// down or sign out" submenu. It does not cover the XAML flyouts that
+  /// Windows 11 uses for Start, Search, and quick settings, which are not
+  /// menus as far as the window manager is concerned.
+  ///
+  /// # Platform-specific
+  ///
+  /// This method is only available on Windows.
+  fn is_menu_open(&self) -> crate::Result<bool>;
 
   /// Expands `%VAR%` environment variable references in `input`.
   ///
@@ -301,6 +316,21 @@ impl DispatcherExtWindows for Dispatcher {
       u32::try_from(session_flags)
         .is_ok_and(|flags| flags == WTS_SESSIONSTATE_LOCK),
     )
+  }
+
+  fn is_menu_open(&self) -> crate::Result<bool> {
+    let mut info = GUITHREADINFO {
+      #[allow(clippy::cast_possible_truncation)]
+      cbSize: std::mem::size_of::<GUITHREADINFO>() as u32,
+      ..Default::default()
+    };
+
+    // A thread id of zero asks about the foreground thread, which is the
+    // one that owns any open menu: Windows gives the menu's owner the
+    // foreground for as long as the menu is up.
+    unsafe { GetGUIThreadInfo(0, std::ptr::from_mut(&mut info)) }?;
+
+    Ok(is_menu_mode(info.flags.0))
   }
 
   fn expand_env_strings(&self, input: &str) -> crate::Result<String> {
@@ -765,11 +795,67 @@ impl std::fmt::Debug for Dispatcher {
   }
 }
 
+/// Whether `GUITHREADINFO::flags` says a menu is open.
+///
+/// The three menu-mode bits cover the kinds of menu separately: a menu bar
+/// being tracked, a window's system menu, and a popup menu. Any of them
+/// means a menu is on screen waiting for the user.
+#[cfg(any(test, target_os = "windows"))]
+pub(crate) const fn is_menu_mode(flags: u32) -> bool {
+  /// `GUI_INMENUMODE`.
+  const IN_MENU_MODE: u32 = 0x0000_0004;
+  /// `GUI_SYSTEMMENUMODE`.
+  const SYSTEM_MENU_MODE: u32 = 0x0000_0008;
+  /// `GUI_POPUPMENUMODE`.
+  const POPUP_MENU_MODE: u32 = 0x0000_0010;
+
+  flags & (IN_MENU_MODE | SYSTEM_MENU_MODE | POPUP_MENU_MODE) != 0
+}
+
+// The values above are duplicated so that the predicate, and its tests,
+// build on platforms without the Windows crate. Hold them to the real
+// constants where those exist, so a mismatch is a build error rather than
+// a guard that silently never fires.
+#[cfg(target_os = "windows")]
+const _: () = {
+  assert!(is_menu_mode(GUI_INMENUMODE.0));
+  assert!(is_menu_mode(GUI_SYSTEMMENUMODE.0));
+  assert!(is_menu_mode(GUI_POPUPMENUMODE.0));
+  assert!(!is_menu_mode(GUI_CARETBLINKING.0));
+  assert!(!is_menu_mode(GUI_INMOVESIZE.0));
+};
+
 #[cfg(test)]
 mod tests {
   use std::sync::{Arc, Mutex};
 
+  use super::is_menu_mode;
   use crate::EventLoop;
+
+  #[test]
+  fn recognizes_every_kind_of_open_menu() {
+    // Menu bar, system menu, and popup menu respectively.
+    assert!(is_menu_mode(0x0000_0004));
+    assert!(is_menu_mode(0x0000_0008));
+    assert!(is_menu_mode(0x0000_0010));
+
+    // What a tray icon's menu reports in practice: a popup menu tracked
+    // from a menu bar, so both bits are set at once.
+    assert!(is_menu_mode(0x0000_0014));
+  }
+
+  #[test]
+  fn ignores_flags_that_are_not_a_menu() {
+    assert!(!is_menu_mode(0));
+
+    // A blinking caret and an in-progress move/resize are the other things
+    // this field reports. Neither is a menu, and treating them as one
+    // would block focus recovery while a window is merely being
+    // dragged.
+    assert!(!is_menu_mode(0x0000_0001));
+    assert!(!is_menu_mode(0x0000_0002));
+    assert!(!is_menu_mode(0x0000_0003));
+  }
 
   #[test]
   fn dispatch_after_stop_fails() {

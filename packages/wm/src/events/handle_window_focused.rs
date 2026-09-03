@@ -1,6 +1,8 @@
 use anyhow::Context;
 use tracing::info;
 use wm_common::{DisplayState, WindowRuleEvent, WmEvent};
+#[cfg(target_os = "windows")]
+use wm_platform::DispatcherExtWindows;
 use wm_platform::NativeWindow;
 
 #[cfg(target_os = "windows")]
@@ -181,6 +183,16 @@ fn schedule_shell_focus_restore(
         || !target.is_visible().unwrap_or(false)
         || target.is_minimized().unwrap_or(true)
       {
+        return;
+      }
+
+      // The taskbar and desktop context menus keep the foreground on the
+      // window they belong to, so focus looks stranded on the shell for as
+      // long as one is open. Restoring would dismiss the menu mid-use, and
+      // the retries run soon enough after the click to catch a menu the
+      // user has only just opened. Checked on each pass rather than once
+      // up front, since the menu can open after the restore is scheduled.
+      if dispatcher.is_menu_open().unwrap_or(false) {
         return;
       }
 
