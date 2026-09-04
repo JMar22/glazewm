@@ -379,6 +379,13 @@ impl NativeWindow {
     unsafe { GetWindow(self.hwnd(), GW_OWNER) }.0 != 0
   }
 
+  /// Implements [`NativeWindowWindowsExt::owner_window`].
+  pub(crate) fn owner_window(&self) -> Option<crate::NativeWindow> {
+    let handle = unsafe { GetWindow(self.hwnd(), GW_OWNER) };
+
+    (handle.0 != 0).then(|| NativeWindow::new(handle.0).into())
+  }
+
   /// Implements [`NativeWindowWindowsExt::has_window_style`].
   pub(crate) fn has_window_style(&self, style: WINDOW_STYLE) -> bool {
     let current_style =

@@ -196,10 +196,26 @@ pub(crate) fn is_stranded_focus_target(
 pub(crate) const SHELL_POPUP_WINDOW_CLASS: &str =
   "Xaml_WindowedPopupClass";
 
+/// How much taller than the taskbar a popup must be to be a menu.
+///
+/// The shell draws its tooltips into the same window class as its menus,
+/// owned by the same taskbar, with identical window and extended styles --
+/// there is nothing in the window itself that says which is which. Size is
+/// the one thing that separates them: measured against a 40px taskbar, a
+/// tooltip is 41px tall while the Win+X menu is 608px and its "Shut down
+/// or sign out" submenu 154px. Comparing against the taskbar rather than
+/// against a pixel count keeps that true whatever the display scaling.
+///
+/// This is a heuristic, and the consequence of it being wrong is bounded
+/// in the safe direction: too low and a stranded tooltip delays focus
+/// recovery, too high and a menu is dismissed as it was before.
+#[cfg(any(test, target_os = "windows"))]
+pub(crate) const MENU_POPUP_MIN_TASKBAR_HEIGHTS: i32 = 2;
+
 /// Whether the shell is showing a popup menu.
 ///
 /// The shell destroys these windows as its menus close, so this is only
-/// true while one is on screen. Focus left on the taskbar with no popup
+/// true while one is on screen. Focus left on the taskbar with no menu
 /// open is the stranding this module exists to recover from, and is
 /// unaffected.
 ///
@@ -216,8 +232,30 @@ pub(crate) fn shell_popup_is_open(dispatcher: &Dispatcher) -> bool {
         && window.process_name().is_ok_and(|process_name| {
           process_name.eq_ignore_ascii_case("explorer")
         })
+        && popup_is_menu_sized(window)
     })
   })
+}
+
+/// Whether a shell popup is large enough to be a menu rather than a
+/// tooltip.
+///
+/// Measured against the popup's owner, which for both is the taskbar. A
+/// popup with no owner is not one of the shell's, and is left to the class
+/// and process checks to reject.
+#[cfg(target_os = "windows")]
+fn popup_is_menu_sized(popup: &NativeWindow) -> bool {
+  let Some(owner) = popup.owner_window() else {
+    return false;
+  };
+
+  let (Ok(popup_frame), Ok(owner_frame)) = (popup.frame(), owner.frame())
+  else {
+    return false;
+  };
+
+  popup_frame.height()
+    > owner_frame.height() * MENU_POPUP_MIN_TASKBAR_HEIGHTS
 }
 
 /// Whether a focus event target is the desktop or the taskbar frame.
@@ -237,7 +275,48 @@ pub(crate) fn is_taskbar_window_class(class_name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-  use super::{is_taskbar_window_class, SHELL_POPUP_WINDOW_CLASS};
+  use super::{
+    is_taskbar_window_class, MENU_POPUP_MIN_TASKBAR_HEIGHTS,
+    SHELL_POPUP_WINDOW_CLASS,
+  };
+
+  /// Heights measured from the shell against a 40px taskbar.
+  const TASKBAR_HEIGHT: i32 = 40;
+  const TOOLTIP_HEIGHT: i32 = 41;
+  const SUBMENU_HEIGHT: i32 = 154;
+  const MENU_HEIGHT: i32 = 608;
+
+  fn is_menu_sized(popup_height: i32, taskbar_height: i32) -> bool {
+    popup_height > taskbar_height * MENU_POPUP_MIN_TASKBAR_HEIGHTS
+  }
+
+  #[test]
+  fn separates_the_shell_menus_from_its_tooltips() {
+    assert!(is_menu_sized(MENU_HEIGHT, TASKBAR_HEIGHT));
+    assert!(is_menu_sized(SUBMENU_HEIGHT, TASKBAR_HEIGHT));
+
+    // The tooltip is a hair taller than the taskbar itself, and stays on
+    // screen indefinitely once the shell strands one. Counting it as a
+    // menu would hold focus recovery off for as long as it lasted.
+    assert!(!is_menu_sized(TOOLTIP_HEIGHT, TASKBAR_HEIGHT));
+  }
+
+  #[test]
+  fn the_separation_survives_display_scaling() {
+    // Every height scales together, so the threshold has to hold at any
+    // scaling rather than at the one it was measured on.
+    for scale in [1, 2, 3] {
+      assert!(is_menu_sized(MENU_HEIGHT * scale, TASKBAR_HEIGHT * scale));
+      assert!(is_menu_sized(
+        SUBMENU_HEIGHT * scale,
+        TASKBAR_HEIGHT * scale
+      ));
+      assert!(!is_menu_sized(
+        TOOLTIP_HEIGHT * scale,
+        TASKBAR_HEIGHT * scale
+      ));
+    }
+  }
 
   #[test]
   fn a_shell_popup_is_not_itself_a_taskbar() {

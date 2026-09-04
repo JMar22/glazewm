@@ -185,6 +185,13 @@ pub trait NativeWindowWindowsExt {
   /// This method is only available on Windows.
   fn has_owner_window(&self) -> bool;
 
+  /// The window's owner, if it has one.
+  ///
+  /// # Platform-specific
+  ///
+  /// This method is only available on Windows.
+  fn owner_window(&self) -> Option<NativeWindow>;
+
   /// Whether the window has the given window style flag(s) set.
   ///
   /// # Platform-specific
@@ -359,6 +366,10 @@ impl NativeWindowWindowsExt for NativeWindow {
 
   fn has_owner_window(&self) -> bool {
     self.inner.has_owner_window()
+  }
+
+  fn owner_window(&self) -> Option<NativeWindow> {
+    self.inner.owner_window()
   }
 
   fn has_window_style(&self, style: WINDOW_STYLE) -> bool {
