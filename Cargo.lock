@@ -2322,8 +2322,6 @@ dependencies = [
 [[package]]
 name = "shell-util"
 version = "0.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a1b310932f52a5ee39a8636ea7ec44c3255ecc2ce916198d89e405d133c1f4e6"
 dependencies = [
  "encoding_rs",
  "os_pipe",

@@ -4,7 +4,7 @@ pub mod prelude {
   // ToSpanError is not used yet, but will be used in the future.
   // TODO: Remove unused_imports allow
   #[allow(unused_imports)]
-  pub use super::{EmitError, ThenError, ToError, ToSpanError};
+  pub use super::{ThenError, ToError, ToSpanError};
 }
 
 /// Extends the `bool` type with a method that returns an error if the
@@ -83,34 +83,5 @@ where
 {
   fn serror<D: core::fmt::Display>(&self, message: D) -> syn::Error {
     syn::Error::new(self.span(), message)
-  }
-}
-
-// Very likely to be used in future.
-// TODO: Remove dead code allow
-#[allow(dead_code)]
-pub trait EmitError {
-  /// Directly emits a warning message at the span of this object.
-  fn emit_warning<D: Into<String>>(&self, message: D);
-  /// Emits a help message at the span of this object.
-  fn emit_help<D: Into<String>>(&self, message: D);
-  /// Emits a note message at the span of this object.
-  fn emit_note<D: Into<String>>(&self, message: D);
-}
-
-impl<T> EmitError for T
-where
-  T: syn::spanned::Spanned,
-{
-  fn emit_warning<D: Into<String>>(&self, message: D) {
-    self.span().unwrap().warning(message).emit();
-  }
-
-  fn emit_help<D: Into<String>>(&self, message: D) {
-    self.span().unwrap().help(message).emit();
-  }
-
-  fn emit_note<D: Into<String>>(&self, message: D) {
-    self.span().unwrap().note(message).emit();
   }
 }

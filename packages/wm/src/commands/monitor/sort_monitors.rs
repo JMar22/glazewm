@@ -15,7 +15,7 @@ pub fn sort_monitors(root: &RootContainer) -> anyhow::Result<()> {
       let rect = monitor.to_rect()?.clone();
       anyhow::Ok((monitor, rect))
     })
-    .try_collect::<Vec<_>>()?;
+    .collect::<Result<Vec<_>, _>>()?;
 
   // Sort monitors from left-to-right, top-to-bottom.
   monitors_with_rect.sort_by(|(_, rect_a), (_, rect_b)| {

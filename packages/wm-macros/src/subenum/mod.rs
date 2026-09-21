@@ -64,14 +64,24 @@ pub fn sub_enum(
     })
     .collect::<Vec<_>>();
 
-  for variant in &variants {
-    for enum_name in &variant.enums {
-      if !sub_enums.iter().any(|sub_enum| sub_enum.name == *enum_name) {
-        enum_name.emit_warning(
-          "Variant references a subenum that is not defined.",
-        );
-      }
-    }
+  // A variant naming an undeclared subenum is always a typo, and the
+  // variant would otherwise be silently left out of it. Reject every such
+  // reference in one error.
+  let mut undefined_refs = variants
+    .iter()
+    .flat_map(|variant| &variant.enums)
+    .filter(|enum_name| {
+      !sub_enums
+        .iter()
+        .any(|sub_enum| sub_enum.name == **enum_name)
+    })
+    .map(|enum_name| {
+      enum_name.error("Variant references a subenum that is not defined.")
+    });
+
+  if let Some(mut error) = undefined_refs.next() {
+    error.extend(undefined_refs);
+    return error.to_compile_error().into();
   }
 
   let sub_enums = combine_variants(sub_enums, variants, &defaults);

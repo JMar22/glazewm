@@ -61,7 +61,7 @@ impl SplitContainer {
       .children()
       .iter()
       .map(CommonGetters::to_dto)
-      .try_collect()?;
+      .collect::<Result<_, _>>()?;
 
     Ok(ContainerDto::Split(SplitContainerDto {
       id: self.id(),

@@ -31,7 +31,7 @@ pub fn handle_display_settings_changed(
           let properties = NativeMonitorProperties::try_from(&display)?;
           Ok((display, properties))
         })
-        .try_collect::<Vec<_>>()
+        .collect::<Result<Vec<_>, _>>()
     }));
 
   let mut pending_monitors = state.monitors();

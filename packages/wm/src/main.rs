@@ -7,7 +7,6 @@
   windows_subsystem = "windows"
 )]
 #![warn(clippy::all, clippy::pedantic)]
-#![feature(iterator_try_collect)]
 
 #[cfg(target_os = "macos")]
 use std::io::IsTerminal;

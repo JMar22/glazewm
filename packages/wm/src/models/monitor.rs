@@ -103,7 +103,7 @@ impl Monitor {
       .children()
       .iter()
       .map(CommonGetters::to_dto)
-      .try_collect()?;
+      .collect::<Result<_, _>>()?;
 
     Ok(ContainerDto::Monitor(MonitorDto {
       id: self.id(),

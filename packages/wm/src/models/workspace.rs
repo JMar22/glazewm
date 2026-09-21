@@ -157,7 +157,7 @@ impl Workspace {
       .children()
       .iter()
       .map(CommonGetters::to_dto)
-      .try_collect()?;
+      .collect::<Result<_, _>>()?;
 
     Ok(ContainerDto::Workspace(WorkspaceDto {
       id: self.id(),

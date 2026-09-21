@@ -184,7 +184,7 @@ impl IpcServer {
               .windows()
               .into_iter()
               .map(|window| window.to_dto())
-              .try_collect()?,
+              .collect::<Result<_, _>>()?,
           })
         }
         QueryCommand::Workspaces => {
@@ -194,7 +194,7 @@ impl IpcServer {
               .workspaces()
               .into_iter()
               .map(|workspace| workspace.to_dto())
-              .try_collect()?,
+              .collect::<Result<_, _>>()?,
           })
         }
         QueryCommand::Monitors => {
@@ -204,7 +204,7 @@ impl IpcServer {
               .monitors()
               .into_iter()
               .map(|monitor| monitor.to_dto())
-              .try_collect()?,
+              .collect::<Result<_, _>>()?,
           })
         }
         QueryCommand::BindingModes => {

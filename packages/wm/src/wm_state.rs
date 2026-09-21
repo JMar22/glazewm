@@ -274,7 +274,7 @@ impl WmState {
         let rect = monitor.native_properties().bounds;
         anyhow::Ok((monitor, rect))
       })
-      .try_collect::<Vec<_>>()?;
+      .collect::<Result<Vec<_>, _>>()?;
 
     let closest_monitor = monitors_with_rect
       .into_iter()

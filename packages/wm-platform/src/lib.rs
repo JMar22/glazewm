@@ -1,6 +1,5 @@
 #![warn(clippy::all, clippy::pedantic)]
 #![allow(clippy::missing_errors_doc)]
-#![feature(iterator_try_collect)]
 
 mod dispatcher;
 mod display;

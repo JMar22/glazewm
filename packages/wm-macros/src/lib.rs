@@ -1,7 +1,3 @@
-// Enable proc macro diagnostics to allow emitting warnings and errors in
-// line
-#![feature(proc_macro_diagnostic)]
-
 mod common;
 mod enum_from_inner;
 mod subenum;

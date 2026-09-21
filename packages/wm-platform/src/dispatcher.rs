@@ -566,7 +566,7 @@ impl Dispatcher {
         let bounds = display.bounds()?;
         crate::Result::Ok((display, bounds))
       })
-      .try_collect::<Vec<_>>()?;
+      .collect::<Result<Vec<_>, _>>()?;
 
     displays_with_bounds.sort_by(|(_, bounds_a), (_, bounds_b)| {
       if bounds_a.x() == bounds_b.x() {
