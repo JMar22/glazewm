@@ -22,10 +22,11 @@ use tracing::info;
 use wm_platform::{NativeWindow, NativeWindowWindowsExt};
 
 #[cfg(target_os = "windows")]
-use super::{
-  platform_sync::is_covering_taskbar,
-  reconcile_focus::is_taskbar_window_class,
-};
+use super::platform_sync::is_covering_taskbar;
+// `has_taskbar_above` is compiled for tests on every platform, so its
+// helper import has to be too.
+#[cfg(any(test, target_os = "windows"))]
+use super::reconcile_focus::is_taskbar_window_class;
 #[cfg(target_os = "windows")]
 use crate::traits::WindowGetters;
 use crate::wm_state::WmState;
