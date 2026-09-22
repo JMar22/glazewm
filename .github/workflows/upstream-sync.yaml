@@ -83,7 +83,7 @@ jobs:
         with:
           components: clippy, rustfmt
           targets: x86_64-pc-windows-msvc
-          toolchain: nightly
+          toolchain: stable
 
       - name: Restore Rust cache
         if: steps.rebase.outputs.changed == 'true' && steps.rebase.outputs.conflict != 'true'
