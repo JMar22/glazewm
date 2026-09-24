@@ -1,0 +1,11 @@
+# Every action in these workflows is pinned to a full commit SHA. Dependabot is
+# the freshness net for those pins: it opens a pull request when a pinned
+# action ships a new release, so a SHA cannot silently age onto a deprecated
+# runtime (the floating actions/checkout@v4 had, onto Node 20). Monthly, like
+# the dotfiles repository that pins this fork.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

@@ -6,6 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: write
   contents: write
   issues: write
 
@@ -19,8 +20,19 @@ jobs:
     runs-on: windows-latest
 
     steps:
+      # GitHub disables a public repository's scheduled workflows after 60 days
+      # without repository activity, and this sync commits nothing while
+      # upstream is quiet (it was, from April to September 2026). Re-enabling
+      # the workflow through the API on every run resets that clock without a
+      # dummy commit.
+      - name: Keep the daily schedule enabled
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api --method PUT "repos/${GITHUB_REPOSITORY}/actions/workflows/upstream-sync.yaml/enable"
+
       - name: Check out fork branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           ref: main
@@ -87,7 +99,7 @@ jobs:
 
       - name: Restore Rust cache
         if: steps.rebase.outputs.changed == 'true' && steps.rebase.outputs.conflict != 'true'
-        uses: swatinem/rust-cache@f0deed1e0edfc6a9be95417288c0e1099b1eeec3
+        uses: swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
         with:
           shared-key: upstream-sync-x86_64-pc-windows-msvc-${{ hashFiles('Cargo.lock') }}
 
