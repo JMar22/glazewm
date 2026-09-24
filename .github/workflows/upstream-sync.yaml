@@ -91,7 +91,7 @@ jobs:
 
       - name: Install Rust toolchain
         if: steps.rebase.outputs.changed == 'true' && steps.rebase.outputs.conflict != 'true'
-        uses: dtolnay/rust-toolchain@21dc36fb71dd22e3317045c0c31a3f4249868b17
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
         with:
           components: clippy, rustfmt
           targets: x86_64-pc-windows-msvc
@@ -99,7 +99,7 @@ jobs:
 
       - name: Restore Rust cache
         if: steps.rebase.outputs.changed == 'true' && steps.rebase.outputs.conflict != 'true'
-        uses: swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
+        uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: upstream-sync-x86_64-pc-windows-msvc-${{ hashFiles('Cargo.lock') }}
 

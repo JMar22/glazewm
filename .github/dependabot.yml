@@ -9,3 +9,11 @@ updates:
     directory: /
     schedule:
       interval: monthly
+    # Neither has a release tag at the pinned commit, so Dependabot cannot tell
+    # which version it would replace and records an error on every run.
+    # glzr-io/actions has no tags at all, and winget-releaser's v2 tag is older
+    # than the pinned commit. Both are upstream's own automation (the PR-title
+    # check and the winget release) and never run in the fork's normal flow.
+    ignore:
+      - dependency-name: glzr-io/actions/semantic-prs
+      - dependency-name: vedantmgoyal9/winget-releaser
