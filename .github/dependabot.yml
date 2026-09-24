@@ -9,11 +9,18 @@ updates:
     directory: /
     schedule:
       interval: monthly
+    # Titles the pull requests "ci: bump ...". Dependabot's default "build(deps):"
+    # fails the PR title check, whose allowed types exclude build, and that
+    # check then crashes with a 403 trying to comment, because a Dependabot run
+    # gets a read-only token.
+    commit-message:
+      prefix: ci
     # Neither has a release tag at the pinned commit, so Dependabot cannot tell
     # which version it would replace and records an error on every run.
     # glzr-io/actions has no tags at all, and winget-releaser's v2 tag is older
-    # than the pinned commit. Both are upstream's own automation (the PR-title
-    # check and the winget release) and never run in the fork's normal flow.
+    # than the pinned commit. Both are upstream's own automation: the PR title
+    # check, which only runs on pull requests, and the winget release, which
+    # the fork never runs.
     ignore:
       - dependency-name: glzr-io/actions/semantic-prs
       - dependency-name: vedantmgoyal9/winget-releaser
