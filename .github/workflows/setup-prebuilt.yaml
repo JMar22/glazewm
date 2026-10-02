@@ -1,0 +1,107 @@
+name: Setup prebuilt
+
+# Builds one commit of this fork the way the dotfiles setup builds it on a fresh
+# box (stable Rust, x86_64-pc-windows-gnu cross-compiled with MinGW, `--locked
+# --release --workspace`, static CRT) and publishes glazewm.exe and
+# glazewm-watcher.exe as assets of a `setup-<commit8>` release, so setup can
+# download them instead of compiling. Setup pins the SHA-256 of each asset in its
+# own repository, so what it installs is what was reviewed there; the release
+# digest GitHub records and the build-provenance attestation below are for
+# checking that pin when it is made, not what setup trusts at install time. If
+# the release is missing or an asset's digest differs, setup falls back to
+# compiling the pinned source.
+#
+# Run it by hand against the commit setup pins:
+#   gh workflow run setup-prebuilt.yaml -R JMar22/glazewm -f commit=<40-char sha>
+# It refuses to replace an existing release, so a pinned digest never goes stale.
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: Full 40-character commit SHA to build (the commit setup pins).
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: setup-prebuilt-${{ inputs.commit }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      # Create the release and its tag.
+      contents: write
+      # Sign the provenance attestation.
+      id-token: write
+      attestations: write
+    env:
+      COMMIT: ${{ inputs.commit }}
+    steps:
+      - name: Validate the commit input
+        shell: bash
+        run: |
+          [[ "$COMMIT" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "commit must be a full, lowercase 40-character SHA" >&2
+            exit 1
+          }
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.commit }}
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
+        with:
+          toolchain: stable
+          targets: x86_64-pc-windows-gnu
+
+      # Only the win32-threads variant: x86_64-w64-mingw32-gcc resolves to it, and
+      # the metapackage's posix variant is 48 MB nothing here links against.
+      - name: Install the MinGW cross compiler
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends gcc-mingw-w64-x86-64-win32
+
+      - name: Build
+        shell: bash
+        env:
+          CARGO_INCREMENTAL: "0"
+          RUSTFLAGS: -C target-feature=+crt-static
+        run: |
+          export VERSION_NUMBER="0.0.0-fork.${COMMIT:0:8}"
+          cargo build --locked --release --workspace --target x86_64-pc-windows-gnu
+
+      - name: Stage the assets
+        shell: bash
+        run: |
+          mkdir dist
+          cp target/x86_64-pc-windows-gnu/release/glazewm.exe \
+            target/x86_64-pc-windows-gnu/release/glazewm-watcher.exe dist/
+          (cd dist && sha256sum glazewm.exe glazewm-watcher.exe | tee SHA256SUMS)
+
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/glazewm.exe
+            dist/glazewm-watcher.exe
+
+      - name: Publish the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="setup-${COMMIT:0:8}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag already exists; not replacing assets setup has pinned." >&2
+            exit 1
+          fi
+          gh release create "$tag" dist/glazewm.exe dist/glazewm-watcher.exe dist/SHA256SUMS \
+            --target "$COMMIT" --prerelease \
+            --title "Setup prebuilt ${COMMIT:0:8}" \
+            --notes "GlazeWM built from ${COMMIT} for the dotfiles setup: stable Rust, x86_64-pc-windows-gnu, \`--locked --release --workspace\`, static CRT. SHA-256 sums are in SHA256SUMS; the build provenance is attested (\`gh attestation verify glazewm.exe -R ${GITHUB_REPOSITORY}\`)."
