@@ -165,6 +165,17 @@ pub trait DispatcherExtWindows {
   /// This method is only available on Windows.
   fn is_session_locked(&self) -> crate::Result<bool>;
 
+  /// Gets whether the console display is currently off.
+  ///
+  /// Tracked from the display's power-state notifications, so it reads as
+  /// on until a [`DisplayListener`](crate::DisplayListener) exists to
+  /// report otherwise.
+  ///
+  /// # Platform-specific
+  ///
+  /// This method is only available on Windows.
+  fn is_display_off(&self) -> bool;
+
   /// Gets whether a menu is currently open anywhere on the desktop.
   ///
   /// Covers the classic menus the shell still uses: tray icon menus, the
@@ -316,6 +327,10 @@ impl DispatcherExtWindows for Dispatcher {
       u32::try_from(session_flags)
         .is_ok_and(|flags| flags == WTS_SESSIONSTATE_LOCK),
     )
+  }
+
+  fn is_display_off(&self) -> bool {
+    platform_impl::is_display_off()
   }
 
   fn is_menu_open(&self) -> crate::Result<bool> {

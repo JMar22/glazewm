@@ -7,7 +7,7 @@ use wm_platform::NativeWindow;
 
 #[cfg(target_os = "windows")]
 use crate::commands::general::{
-  is_shell_focus_target, shell_popup_is_open,
+  is_shell_focus_target, is_user_away, shell_popup_is_open,
 };
 use crate::{
   commands::{
@@ -175,6 +175,12 @@ fn schedule_shell_focus_restore(
       };
 
       if current == target {
+        return;
+      }
+
+      // Nobody to restore focus for, and the restore would wake the
+      // display.
+      if is_user_away(&dispatcher) {
         return;
       }
 

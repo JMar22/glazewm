@@ -55,16 +55,9 @@ pub fn reconcile_stranded_focus(
     return Ok(());
   }
 
-  // A locked session has no user to hand focus back to, and the lock
-  // screen legitimately holds the foreground, so every poll would read
-  // as stranded. Restoring focus calls `SendInput` to defeat the
-  // foreground lock, which Windows counts as user input and uses to
-  // wake the display -- polling that against a lock screen turns the
-  // display back on within seconds of it going off, indefinitely.
-  //
-  // A failed query is treated as unlocked so that a broken lock check
-  // degrades to the previous behaviour rather than disabling recovery.
-  if state.dispatcher.is_session_locked().unwrap_or(false) {
+  // Nobody is there to hand focus back to, and restoring it would only
+  // wake the display. See [`is_user_away`].
+  if is_user_away(&state.dispatcher) {
     state.stranded_focus_ticks = 0;
     state.stranded_focus_attempts = 0;
     return Ok(());
@@ -166,6 +159,27 @@ pub fn reconcile_stranded_focus(
   _config: &UserConfig,
 ) -> anyhow::Result<()> {
   Ok(())
+}
+
+/// Whether the user has left, so there is nobody to hand focus back to.
+///
+/// That is the case while the workstation is locked and while the display
+/// is off. Both leave the foreground with the lock screen or with nothing,
+/// which every restore reads as stranded focus. Restoring calls
+/// `SendInput` to defeat the foreground lock, and Windows counts that as
+/// user input and uses it to wake the display, so acting on it turns the
+/// display back on about a second after it went off.
+///
+/// Win+L locks the session, but the display also goes off on its idle
+/// timeout with the session still unlocked and the desktop still the
+/// input desktop, so the lock state alone does not cover it.
+///
+/// A failed lock query is treated as unlocked so that a broken check
+/// degrades to the previous behaviour rather than disabling recovery.
+#[cfg(target_os = "windows")]
+pub(crate) fn is_user_away(dispatcher: &Dispatcher) -> bool {
+  dispatcher.is_display_off()
+    || dispatcher.is_session_locked().unwrap_or(false)
 }
 
 /// Whether keyboard focus currently sits somewhere the user cannot type.
