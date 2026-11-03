@@ -40,17 +40,14 @@ const MAX_WINDOWS_ABOVE: usize = 500;
 
 /// Re-marks fullscreen windows that the shell has raised the taskbar over.
 ///
-/// A failed re-mark is logged rather than propagated, but the fallible
-/// signature is kept so this matches the other arms of the main event
-/// loop.
+/// A failed re-mark is logged rather than propagated.
 #[cfg(target_os = "windows")]
-#[allow(clippy::unnecessary_wraps)]
-pub fn reconcile_stranded_taskbar(state: &WmState) -> anyhow::Result<()> {
+pub fn reconcile_stranded_taskbar(state: &WmState) {
   // Nothing to hold down when the WM has not told the shell about
   // anything. This is the usual case, so the z-order walk below costs
   // nothing at all for as long as no window is covering the taskbar.
   if state.is_paused || state.windows_marked_fullscreen.is_empty() {
-    return Ok(());
+    return;
   }
 
   let stranded = state
@@ -92,8 +89,6 @@ pub fn reconcile_stranded_taskbar(state: &WmState) -> anyhow::Result<()> {
       tracing::warn!("Failed to re-mark window as fullscreen: {err}");
     }
   }
-
-  Ok(())
 }
 
 /// Gets whether the taskbar is drawn over the given window.
@@ -102,8 +97,8 @@ fn is_behind_taskbar(native: &NativeWindow) -> bool {
   // `window_above` walks towards the top of the stack, ending at the
   // window that has nothing over it.
   let above = std::iter::successors(
-    native.window_above().ok().flatten(),
-    |current| current.window_above().ok().flatten(),
+    native.window_above(),
+    NativeWindowWindowsExt::window_above,
   )
   .map(|window| {
     (

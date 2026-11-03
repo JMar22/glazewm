@@ -79,7 +79,7 @@ pub fn move_workspace_in_direction(
       });
 
     if let Some(workspace) = workspace_to_destroy {
-      deactivate_workspace(workspace, state)?;
+      deactivate_workspace(&workspace, state)?;
     }
 
     sort_workspaces(&target_monitor, config)?;

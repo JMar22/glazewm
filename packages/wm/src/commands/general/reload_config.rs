@@ -1,7 +1,7 @@
 use anyhow::Context;
 use tracing::{info, warn};
 #[cfg(target_os = "windows")]
-use wm_common::{HideMethod, ParsedConfig};
+use wm_common::{HideMethod, ParsedConfig, TaskbarWindows};
 use wm_common::{WindowRuleEvent, WmEvent};
 #[cfg(target_os = "windows")]
 use wm_platform::NativeWindowWindowsExt;
@@ -53,9 +53,9 @@ pub fn reload_config(
   // Ensure all windows are shown in taskbar when `show_all_in_taskbar` is
   // changed.
   #[cfg(target_os = "windows")]
-  if old_config.general.show_all_in_taskbar
-    != config.value.general.show_all_in_taskbar
-    && config.value.general.show_all_in_taskbar
+  if old_config.general.taskbar_windows
+    != config.value.general.taskbar_windows
+    && config.value.general.taskbar_windows == TaskbarWindows::All
   {
     for window in state.windows() {
       let _ = window.native().set_taskbar_visibility(true);

@@ -21,7 +21,6 @@ use crate::{
   wm_state::WmState,
 };
 
-#[allow(clippy::too_many_lines)]
 pub fn handle_window_moved_or_resized(
   native_window: &NativeWindow,
   is_interactive_start: bool,
@@ -29,302 +28,370 @@ pub fn handle_window_moved_or_resized(
   state: &mut WmState,
   config: &UserConfig,
 ) -> anyhow::Result<()> {
-  let found_window = state.window_from_native(native_window);
+  let Some(window) = state.window_from_native(native_window) else {
+    return Ok(());
+  };
 
-  if let Some(window) = found_window {
-    let old_frame_position = window.native_properties().frame;
-    let frame_position = try_warn!(window.native().frame());
+  let old_frame_position = window.native_properties().frame;
+  let frame_position = try_warn!(window.native().frame());
 
-    window.update_native_properties(|properties| {
-      properties.frame = frame_position.clone();
-    });
+  window.update_native_properties(|properties| {
+    properties.frame = frame_position.clone();
+  });
 
-    // Handle windows that are actively being dragged.
-    if !state.is_paused && window.active_drag().is_some() {
-      let is_drag_end = {
-        // The drag operation has ended when `is_interactive_end` is
-        // `true`. This corresponds to a `EVENT_SYSTEM_MOVESIZEEND` event.
-        #[cfg(target_os = "windows")]
-        {
-          is_interactive_end
-        }
-      };
-
-      if is_drag_end {
-        return handle_window_moved_or_resized_end(&window, state, config);
-      }
-
-      return update_drag_state(&window, &frame_position, state, config);
-    }
-
-    let old_is_maximized = window.native_properties().is_maximized;
-    let is_maximized = try_warn!(window.native().is_maximized());
-
-    // Ignore duplicate move/resize events. Window position changes can
-    // trigger multiple events. For example, restoring from maximized can
-    // trigger as many as 4 identical events on Windows.
-    if old_frame_position == frame_position
-      && old_is_maximized == is_maximized
-      && !is_interactive_start
-    {
-      return Ok(());
-    }
-
-    window.update_native_properties(|properties| {
-      properties.is_maximized = is_maximized;
-    });
-
-    // If the window is not maximized, update its cached shadow borders.
-    // Maximized windows temporarily have 0 shadow borders, in which case
-    // we should use its previous value for redraws.
-    #[cfg(target_os = "windows")]
-    {
-      let shadow_borders = try_warn!(window.native().shadow_borders());
-      if !is_maximized {
-        window.update_native_properties(|properties| {
-          properties.shadow_borders = shadow_borders;
-        });
-      }
-    }
-
-    let is_minimized = try_warn!(window.native().is_minimized());
-
-    // Ignore events for minimized windows. Let them be handled by the
-    // `PlatformEvent::WindowMinimized` event handler instead.
-    if is_minimized {
-      return Ok(());
-    }
-
-    // A frame that has just grown over the taskbar, or come back off it,
-    // is the shell's business whatever the WM makes of it. An application
-    // entering its own fullscreen from a maximized window keeps the
-    // native maximized flag, so the WM's state for it does not change and
-    // no redraw follows — this event is the only notice of it.
-    #[cfg(target_os = "windows")]
-    sync_fullscreen_mark(&window, state);
-
-    // Detect whether the window is starting to be interactively moved or
-    // resized by the user (e.g. via the window's drag handles).
-    let is_drag_start = !state.is_paused && {
+  // Handle windows that are actively being dragged.
+  if !state.is_paused && window.active_drag().is_some() {
+    let is_drag_end = {
+      // The drag operation has ended when `is_interactive_end` is
+      // `true`. This corresponds to a `EVENT_SYSTEM_MOVESIZEEND` event.
       #[cfg(target_os = "windows")]
       {
-        // Drag events can be valid for all window states apart from
-        // minimized.
-        is_interactive_start
-          && !matches!(window.state(), WindowState::Minimized)
+        is_interactive_end
       }
     };
 
-    if is_drag_start {
-      tracing::info!("Window started dragging: {window}");
-
-      window.set_active_drag(Some(ActiveDrag {
-        operation: None,
-        is_from_floating: matches!(
-          window.state(),
-          WindowState::Floating(_)
-        ),
-        #[cfg(target_os = "windows")]
-        initial_position: old_frame_position.clone(),
-      }));
-
-      #[cfg(target_os = "windows")]
-      update_drag_state(&window, &frame_position, state, config)?;
-
-      return Ok(());
+    if is_drag_end {
+      return handle_window_moved_or_resized_end(&window, state, config);
     }
 
-    let nearest_monitor = state
-      .nearest_monitor(&window.native())
-      .context("No nearest monitor.")?;
+    return update_drag_state(&window, &frame_position, state, config);
+  }
 
-    // For `HideMethod::PlaceInCorner`, hiding/showing is implemented by
-    // repositioning the window. Since the OS won't emit real
-    // shown/hidden events in this mode, update `DisplayState` based on
-    // whether the window has been moved to the monitor's bottom corner.
-    if config.value.general.hide_method == HideMethod::PlaceInCorner {
-      let is_in_corner = is_in_corner(
-        &frame_position,
-        &nearest_monitor.native_properties().working_area,
-      );
+  let old_is_maximized = window.native_properties().is_maximized;
+  let is_maximized = window.native().is_maximized();
 
-      // TODO: Consider redrawing if hidden and should be shown, or if
-      // shown and should be hidden.
-      // TODO: It can be valid for a floating window to be in the corner,
-      // in which case, it currently doesn't get updated to
-      // `DisplayState::Shown`.
-      let display_state = match (window.display_state(), is_in_corner) {
-        (DisplayState::Hiding, true) => DisplayState::Hidden,
-        (DisplayState::Showing, false) => DisplayState::Shown,
-        _ => window.display_state(),
-      };
+  // Ignore duplicate move/resize events. Window position changes can
+  // trigger multiple events. For example, restoring from maximized can
+  // trigger as many as 4 identical events on Windows.
+  if old_frame_position == frame_position
+    && old_is_maximized == is_maximized
+    && !is_interactive_start
+  {
+    return Ok(());
+  }
 
-      if display_state != window.display_state() {
-        window.set_display_state(display_state);
-        return Ok(());
-      }
+  window.update_native_properties(|properties| {
+    properties.is_maximized = is_maximized;
+  });
+
+  // If the window is not maximized, update its cached shadow borders.
+  // Maximized windows temporarily have 0 shadow borders, in which case
+  // we should use its previous value for redraws.
+  #[cfg(target_os = "windows")]
+  {
+    let shadow_borders = try_warn!(window.native().shadow_borders());
+    if !is_maximized {
+      window.update_native_properties(|properties| {
+        properties.shadow_borders = shadow_borders;
+      });
     }
+  }
 
-    let should_fullscreen = {
-      let workspace = nearest_monitor
-        .displayed_workspace()
-        .context("No workspace.")?;
+  let is_minimized = window.native().is_minimized();
 
-      let should_fullscreen = window.should_fullscreen(&workspace)?;
+  // Ignore events for minimized windows. Let them be handled by the
+  // `PlatformEvent::WindowMinimized` event handler instead.
+  if is_minimized {
+    return Ok(());
+  }
 
-      match window.state() {
-        // Override the fullscreen check for when an app self-exits
-        // fullscreen (e.g. Chrome via F11) and restores its window to
-        // a position that exactly covers the workspace rect.
-        WindowState::Fullscreen(fullscreen)
-          if !fullscreen.maximized && should_fullscreen =>
-        {
-          let workspace_rect = workspace.max_workspace_rect()?;
+  // A frame that has just grown over the taskbar, or come back off it,
+  // is the shell's business whatever the WM makes of it. An application
+  // entering its own fullscreen from a maximized window keeps the
+  // native maximized flag, so the WM's state for it does not change and
+  // no redraw follows — this event is the only notice of it.
+  #[cfg(target_os = "windows")]
+  sync_fullscreen_mark(&window, state);
 
-          let old_frame = old_frame_position
-            .apply_delta(&window.border_delta().inverse(), None);
-          let new_frame = frame_position
-            .apply_delta(&window.border_delta().inverse(), None);
-
-          let old_exceeded =
-            old_frame.inset(1).contains_rect(&workspace_rect);
-          let new_exceeds =
-            new_frame.inset(1).contains_rect(&workspace_rect);
-
-          // The window should no longer be fullscreen if the old frame
-          // exceeded the workspace bounds (app was in OS fullscreen), but
-          // the new frame no longer does. Configs with 0px outer gaps
-          // always use the `should_fullscreen` check, since the old frame
-          // will never exceed the workspace bounds.
-          if old_exceeded && !new_exceeds {
-            false
-          } else {
-            should_fullscreen
-          }
-        }
-        _ => should_fullscreen,
-      }
-    };
-
-    // The WM's state wins over an application resizing itself to cover
-    // the workspace, so the window is queued for redraw to be
-    // re-maximized by the next platform sync.
+  // Detect whether the window is starting to be interactively moved or
+  // resized by the user (e.g. via the window's drag handles).
+  let is_drag_start = !state.is_paused && {
     #[cfg(target_os = "windows")]
-    if is_self_resize_of_maximized_fullscreen(
+    {
+      // Drag events can be valid for all window states apart from
+      // minimized.
+      is_interactive_start
+        && !matches!(window.state(), WindowState::Minimized)
+    }
+  };
+
+  if is_drag_start {
+    tracing::info!("Window started dragging: {window}");
+
+    window.set_active_drag(Some(ActiveDrag {
+      operation: None,
+      is_from_floating: matches!(window.state(), WindowState::Floating(_)),
+      #[cfg(target_os = "windows")]
+      initial_position: old_frame_position.clone(),
+    }));
+
+    #[cfg(target_os = "windows")]
+    update_drag_state(&window, &frame_position, state, config)?;
+
+    return Ok(());
+  }
+
+  handle_frame_change(
+    &window,
+    &old_frame_position,
+    frame_position,
+    is_maximized,
+    state,
+    config,
+  )
+}
+
+/// Reacts to a window's frame having settled somewhere new, outside of a
+/// drag: hiding and showing by corner placement, entering and leaving
+/// fullscreen, and floating windows moving between monitors.
+fn handle_frame_change(
+  window: &WindowContainer,
+  old_frame_position: &Rect,
+  frame_position: Rect,
+  is_maximized: bool,
+  state: &mut WmState,
+  config: &UserConfig,
+) -> anyhow::Result<()> {
+  let nearest_monitor = state
+    .nearest_monitor(&window.native())
+    .context("No nearest monitor.")?;
+
+  if sync_corner_display_state(
+    window,
+    &frame_position,
+    &nearest_monitor,
+    config,
+  ) {
+    return Ok(());
+  }
+
+  let should_fullscreen = should_fullscreen(
+    window,
+    old_frame_position,
+    &frame_position,
+    &nearest_monitor,
+  )?;
+
+  // The WM's state wins over an application resizing itself to cover
+  // the workspace, so the window is queued for redraw to be
+  // re-maximized by the next platform sync.
+  #[cfg(target_os = "windows")]
+  if is_self_resize_of_maximized_fullscreen(
+    is_maximized,
+    should_fullscreen,
+    window.native().has_window_style(WS_CAPTION),
+    &window.state(),
+  ) {
+    tracing::info!("Ignoring self-resize of decorated window: {window}");
+
+    state.pending_sync.queue_container_to_redraw(window.clone());
+
+    return Ok(());
+  }
+
+  // Handle a window being maximized or entering fullscreen.
+  if is_maximized || should_fullscreen {
+    return adopt_fullscreen(
+      window,
       is_maximized,
       should_fullscreen,
-      window.native().has_window_style(WS_CAPTION),
-      &window.state(),
-    ) {
-      tracing::info!("Ignoring self-resize of decorated window: {window}");
+      state,
+      config,
+    );
+  }
 
-      state.pending_sync.queue_container_to_redraw(window.clone());
+  // An application placing its own window as it starts up does not get
+  // to discard the state the window rules just gave it, so the window is
+  // queued for redraw to be re-maximized by the next platform sync.
+  #[cfg(target_os = "windows")]
+  if is_startup_placement_of_maximized_fullscreen(
+    window.native_properties().read_at,
+    &window.state(),
+  ) {
+    tracing::info!("Ignoring startup placement of window: {window}");
 
-      return Ok(());
-    }
+    state.pending_sync.queue_container_to_redraw(window.clone());
 
-    // Handle a window being maximized or entering fullscreen.
-    if is_maximized || should_fullscreen {
-      let is_same_state = is_maximized
-        && matches!(
-          window.state(),
-          WindowState::Fullscreen(FullscreenStateConfig {
-            maximized: true,
-            ..
-          })
-        )
-        || should_fullscreen
-          && matches!(
-            window.state(),
-            WindowState::Fullscreen(FullscreenStateConfig {
-              maximized: false,
-              ..
-            })
-          );
+    return Ok(());
+  }
 
-      // Ignore if there's no state change.
-      if is_same_state {
-        return Ok(());
-      }
+  match window.state() {
+    WindowState::Fullscreen(_) => {
+      // Window is no longer maximized/fullscreen and should be restored.
+      tracing::info!("Restoring window from fullscreen: {window}");
 
-      let fullscreen_state = if let WindowState::Fullscreen(
-        fullscreen_state,
-      ) = window.state()
-      {
-        fullscreen_state
-      } else {
-        config
-          .value
-          .window_behavior
-          .state_defaults
-          .fullscreen
-          .clone()
-      };
-
-      let window = update_window_state(
+      update_window_state(
         window.clone(),
-        WindowState::Fullscreen(FullscreenStateConfig {
-          maximized: is_maximized,
-          ..fullscreen_state
-        }),
+        window.toggled_state(window.state(), config),
         state,
         config,
       )?;
-
-      if is_maximized {
-        // Dequeue the window from redraw if it's maximized, since the
-        // window is already in the correct state.
-        state
-          .pending_sync
-          .dequeue_container_from_redraw(window.clone());
-      }
-
-      // TODO: Handle a fullscreen window being moved from one monitor to
-      // another.
-
-      return Ok(());
     }
-
-    // An application placing its own window as it starts up does not get
-    // to discard the state the window rules just gave it, so the window is
-    // queued for redraw to be re-maximized by the next platform sync.
-    #[cfg(target_os = "windows")]
-    if is_startup_placement_of_maximized_fullscreen(
-      window.native_properties().read_at,
-      &window.state(),
-    ) {
-      tracing::info!("Ignoring startup placement of window: {window}");
-
-      state.pending_sync.queue_container_to_redraw(window.clone());
-
-      return Ok(());
-    }
-
-    match window.state() {
-      WindowState::Fullscreen(_) => {
-        // Window is no longer maximized/fullscreen and should be restored.
-        tracing::info!("Restoring window from fullscreen: {window}");
-
-        update_window_state(
-          window.clone(),
-          window.toggled_state(window.state(), config),
+    WindowState::Floating(_) => {
+      if let WindowContainer::NonTilingWindow(window) = window {
+        update_floating_window_position(
+          window,
+          frame_position,
+          &nearest_monitor,
           state,
-          config,
         )?;
       }
-      WindowState::Floating(_) => {
-        if let WindowContainer::NonTilingWindow(window) = window {
-          update_floating_window_position(
-            &window,
-            frame_position,
-            &nearest_monitor,
-            state,
-          )?;
-        }
-      }
-      _ => {}
+    }
+    _ => {}
+  }
+
+  Ok(())
+}
+
+/// Updates the display state of a window hidden by placing it in the
+/// monitor's corner, from where its new frame puts it.
+///
+/// For `HideMethod::PlaceInCorner`, hiding/showing is implemented by
+/// repositioning the window. Since the OS won't emit real shown/hidden
+/// events in this mode, `DisplayState` follows whether the window has been
+/// moved to the monitor's bottom corner.
+///
+/// Returns whether the display state changed, in which case the event
+/// needs no further handling.
+fn sync_corner_display_state(
+  window: &WindowContainer,
+  frame_position: &Rect,
+  nearest_monitor: &Monitor,
+  config: &UserConfig,
+) -> bool {
+  if config.value.general.hide_method == HideMethod::PlaceInCorner {
+    let is_in_corner = is_in_corner(
+      frame_position,
+      &nearest_monitor.native_properties().working_area,
+    );
+
+    // TODO: Consider redrawing if hidden and should be shown, or if
+    // shown and should be hidden.
+    // TODO: It can be valid for a floating window to be in the corner,
+    // in which case, it currently doesn't get updated to
+    // `DisplayState::Shown`.
+    let display_state = match (window.display_state(), is_in_corner) {
+      (DisplayState::Hiding, true) => DisplayState::Hidden,
+      (DisplayState::Showing, false) => DisplayState::Shown,
+      _ => window.display_state(),
+    };
+
+    if display_state != window.display_state() {
+      window.set_display_state(display_state);
+      return true;
     }
   }
+
+  false
+}
+
+/// Gets whether the window should be fullscreen on the nearest monitor's
+/// displayed workspace, given its frame before and after this event.
+fn should_fullscreen(
+  window: &WindowContainer,
+  old_frame_position: &Rect,
+  frame_position: &Rect,
+  nearest_monitor: &Monitor,
+) -> anyhow::Result<bool> {
+  let workspace = nearest_monitor
+    .displayed_workspace()
+    .context("No workspace.")?;
+
+  let should_fullscreen = window.should_fullscreen(&workspace)?;
+
+  Ok(match window.state() {
+    // Override the fullscreen check for when an app self-exits
+    // fullscreen (e.g. Chrome via F11) and restores its window to
+    // a position that exactly covers the workspace rect.
+    WindowState::Fullscreen(fullscreen)
+      if !fullscreen.maximized && should_fullscreen =>
+    {
+      let workspace_rect = workspace.max_workspace_rect()?;
+
+      let old_frame = old_frame_position
+        .apply_delta(&window.border_delta().inverse(), None);
+      let new_frame =
+        frame_position.apply_delta(&window.border_delta().inverse(), None);
+
+      let old_exceeded = old_frame.inset(1).contains_rect(&workspace_rect);
+      let new_exceeds = new_frame.inset(1).contains_rect(&workspace_rect);
+
+      // The window should no longer be fullscreen if the old frame
+      // exceeded the workspace bounds (app was in OS fullscreen), but
+      // the new frame no longer does. Configs with 0px outer gaps
+      // always use the `should_fullscreen` check, since the old frame
+      // will never exceed the workspace bounds.
+      if old_exceeded && !new_exceeds {
+        false
+      } else {
+        should_fullscreen
+      }
+    }
+    _ => should_fullscreen,
+  })
+}
+
+/// Moves a window that has been maximized, or has made itself fullscreen,
+/// into the matching fullscreen state.
+fn adopt_fullscreen(
+  window: &WindowContainer,
+  is_maximized: bool,
+  should_fullscreen: bool,
+  state: &mut WmState,
+  config: &UserConfig,
+) -> anyhow::Result<()> {
+  let is_same_state = is_maximized
+    && matches!(
+      window.state(),
+      WindowState::Fullscreen(FullscreenStateConfig {
+        maximized: true,
+        ..
+      })
+    )
+    || should_fullscreen
+      && matches!(
+        window.state(),
+        WindowState::Fullscreen(FullscreenStateConfig {
+          maximized: false,
+          ..
+        })
+      );
+
+  // Ignore if there's no state change.
+  if is_same_state {
+    return Ok(());
+  }
+
+  let fullscreen_state =
+    if let WindowState::Fullscreen(fullscreen_state) = window.state() {
+      fullscreen_state
+    } else {
+      config
+        .value
+        .window_behavior
+        .state_defaults
+        .fullscreen
+        .clone()
+    };
+
+  let window = update_window_state(
+    window.clone(),
+    WindowState::Fullscreen(FullscreenStateConfig {
+      maximized: is_maximized,
+      ..fullscreen_state
+    }),
+    state,
+    config,
+  )?;
+
+  if is_maximized {
+    // Dequeue the window from redraw if it's maximized, since the
+    // window is already in the correct state.
+    state.pending_sync.dequeue_container_from_redraw(window);
+  }
+
+  // TODO: Handle a fullscreen window being moved from one monitor to
+  // another.
 
   Ok(())
 }
@@ -466,7 +533,7 @@ fn update_drag_state(
       // the behavior is consistent.
       if let Some(split_parent) = parent.as_split() {
         if split_parent.child_count() == 1 {
-          flatten_split_container(split_parent.clone())?;
+          flatten_split_container(split_parent)?;
 
           // Hacky fix to redraw siblings after flattening. The parent is
           // queued for redraw from the state change, which gets detached

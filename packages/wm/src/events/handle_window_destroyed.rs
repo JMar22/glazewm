@@ -22,7 +22,7 @@ pub fn handle_window_destroyed(
     let workspace = window.workspace().context("No workspace.")?;
 
     info!("Window closed: {window}");
-    unmanage_window(window, state)?;
+    unmanage_window(&window, state)?;
 
     // Destroy parent workspace if window was killed while its workspace
     // was not displayed (e.g. via task manager).
@@ -30,7 +30,7 @@ pub fn handle_window_destroyed(
       && !workspace.has_children()
       && !workspace.is_displayed()
     {
-      deactivate_workspace(workspace, state)?;
+      deactivate_workspace(&workspace, state)?;
     }
   }
 

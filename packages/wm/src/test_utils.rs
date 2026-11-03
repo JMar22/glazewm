@@ -15,7 +15,7 @@ use crate::{
   models::{
     Monitor, NativeMonitorProperties, NativeWindowProperties,
     NonTilingWindow, SplitContainer, TilingContainer, TilingWindow,
-    Workspace,
+    WindowInit, Workspace,
   },
   traits::TilingSizeGetters,
 };
@@ -135,6 +135,25 @@ impl NativeWindowProperties {
   }
 }
 
+/// Creation fields for a mock window that has not been moved or resized.
+fn mock_window_init(
+  native: NativeWindow,
+  properties: NativeWindowProperties,
+  floating_placement: Rect,
+) -> WindowInit {
+  WindowInit {
+    id: None,
+    native,
+    properties,
+    prev_state: None,
+    border_delta: mock_border_delta(),
+    floating_placement,
+    has_custom_floating_placement: false,
+    done_window_rules: vec![],
+    active_drag: None,
+  }
+}
+
 #[bon]
 impl NonTilingWindow {
   #[builder]
@@ -153,16 +172,8 @@ impl NonTilingWindow {
       .call();
 
     Self::new(
-      None,
-      native,
-      properties,
+      mock_window_init(native, properties, floating_placement),
       state,
-      None,
-      mock_border_delta(),
-      None,
-      floating_placement,
-      false,
-      vec![],
       None,
     )
   }
@@ -171,7 +182,6 @@ impl NonTilingWindow {
 #[bon]
 impl SplitContainer {
   #[builder]
-  #[allow(clippy::cast_precision_loss)]
   pub fn mock(
     #[builder(default = TilingDirection::Horizontal)]
     tiling_direction: TilingDirection,
@@ -207,16 +217,8 @@ impl TilingWindow {
       .call();
 
     let window = Self::new(
-      None,
-      native,
-      properties,
-      None,
-      mock_border_delta(),
-      floating_placement,
-      false,
+      mock_window_init(native, properties, floating_placement),
       gaps_config,
-      vec![],
-      None,
     );
 
     window.set_tiling_size(tiling_size);

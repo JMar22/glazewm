@@ -2,15 +2,15 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Deserializer, Serialize};
 
+use crate::f32_to_int;
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct OpacityValue(pub f32);
 
 impl OpacityValue {
   #[must_use]
   pub fn to_alpha(&self) -> u8 {
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    let alpha = (self.0 * 255.0).round() as u8;
-    alpha
+    f32_to_int((self.0 * 255.0).round())
   }
 
   #[must_use]

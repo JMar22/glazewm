@@ -1,4 +1,4 @@
-#![allow(clippy::missing_errors_doc)]
+#![warn(clippy::all, clippy::pedantic)]
 
 use anyhow::Context;
 use futures_util::{SinkExt, StreamExt};
@@ -17,6 +17,12 @@ pub struct IpcClient {
 }
 
 impl IpcClient {
+  /// Connects to the IPC server of the running WM.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if the server can't be reached on
+  /// `DEFAULT_IPC_PORT`, e.g. because the WM isn't running.
   pub async fn connect() -> anyhow::Result<Self> {
     let server_addr = format!("ws://127.0.0.1:{DEFAULT_IPC_PORT}");
 
@@ -28,6 +34,10 @@ impl IpcClient {
   }
 
   /// Sends a message to the IPC server.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if the message can't be sent over the connection.
   pub async fn send(&mut self, message: &str) -> anyhow::Result<()> {
     self
       .stream
@@ -39,6 +49,11 @@ impl IpcClient {
   }
 
   /// Waits and returns the next reply from the IPC server.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if the connection closes or fails, or if the reply
+  /// isn't a text message holding a valid `ServerMessage`.
   pub async fn next_message(&mut self) -> anyhow::Result<ServerMessage> {
     let response = self
       .stream

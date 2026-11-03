@@ -28,7 +28,7 @@ pub fn flatten_child_split_containers(
       // Handle case where the parent is a split container and has a
       // single split container child.
       if let Some(split_child) = tiling_children[0].as_split() {
-        flatten_split_container(split_child.clone())?;
+        flatten_split_container(split_child)?;
         parent.set_tiling_direction(parent.tiling_direction().inverse());
       }
     } else {
@@ -46,11 +46,11 @@ pub fn flatten_child_split_containers(
           if let Some(split_grandchild) =
             split_child.children()[0].as_split()
           {
-            flatten_split_container(split_grandchild.clone())?;
+            flatten_split_container(split_grandchild)?;
           }
         }
 
-        flatten_split_container(split_child.clone())?;
+        flatten_split_container(split_child)?;
       }
     }
   }

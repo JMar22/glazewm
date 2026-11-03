@@ -1,5 +1,4 @@
 #![warn(clippy::all, clippy::pedantic)]
-#![allow(clippy::missing_errors_doc)]
 
 mod dispatcher;
 mod display;
@@ -10,6 +9,7 @@ mod keybinding_listener;
 mod models;
 mod mouse_listener;
 mod native_window;
+mod num_cast;
 mod platform_event;
 mod platform_impl;
 mod single_instance;
@@ -28,6 +28,7 @@ pub use keybinding_listener::*;
 pub use models::*;
 pub use mouse_listener::*;
 pub use native_window::*;
+pub use num_cast::*;
 pub use platform_event::*;
 pub use single_instance::*;
 pub use thread_bound::*;

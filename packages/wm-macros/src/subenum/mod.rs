@@ -21,15 +21,12 @@ pub fn sub_enum(
     Err(err) => return err.to_compile_error().into(),
   };
 
-  let enum_data = match input.data {
-    syn::Data::Enum(data) => data,
-    _ => {
-      return input
-        .ident
-        .error("This macro can only be used on enums")
-        .to_compile_error()
-        .into();
-    }
+  let syn::Data::Enum(enum_data) = input.data else {
+    return input
+      .ident
+      .error("This macro can only be used on enums")
+      .to_compile_error()
+      .into();
   };
 
   let variants = match enum_data
@@ -48,7 +45,7 @@ pub fn sub_enum(
     .iter()
     .filter_map(|sub| match &sub {
       Subenum::Defaults(attrs) => Some(attrs.clone()),
-      _ => None,
+      Subenum::Declaration(_) => None,
     })
     .reduce(|mut acc, el| {
       acc.extend(el);
@@ -84,7 +81,7 @@ pub fn sub_enum(
     return error.to_compile_error().into();
   }
 
-  let sub_enums = combine_variants(sub_enums, variants, &defaults);
+  let sub_enums = combine_variants(sub_enums, &variants, &defaults);
 
   let sub_enum_to_main_impls = sub_enums
     .iter()
@@ -94,12 +91,32 @@ pub fn sub_enum(
     .iter()
     .map(|sub| try_from_main_to_sub_impl(&input.ident, sub));
 
-  struct SharedVariant {
-    sub_enum_a: syn::Ident,
-    sub_enum_b: syn::Ident,
-    variants: Vec<Variant>,
-  }
+  let shared_variants = shared_variant_impls(&sub_enums);
 
+  quote::quote! {
+    #(#sub_enums)*
+
+    #(#sub_enum_to_main_impls)*
+
+    #(#main_to_sub_impls)*
+
+    #(#shared_variants)*
+  }
+  .into()
+}
+
+/// A pair of sub enums that share variants.
+struct SharedVariant {
+  sub_enum_a: syn::Ident,
+  sub_enum_b: syn::Ident,
+  variants: Vec<Variant>,
+}
+
+/// Creates `TryFrom` impls in both directions between each pair of sub
+/// enums that share variants.
+fn shared_variant_impls(
+  sub_enums: &[SubEnum],
+) -> Vec<proc_macro2::TokenStream> {
   // Find all sub enums that have a shared variant, so we can make
   // `TryFrom` impls between them.
   let mut shared_variants: Vec<SharedVariant> = Vec::new();
@@ -127,67 +144,59 @@ pub fn sub_enum(
     }
   }
 
-  let shared_variants = shared_variants.iter().map(|shared| {
-    let a = &shared.sub_enum_a;
-    let b = &shared.sub_enum_b;
+  shared_variants
+    .iter()
+    .map(|shared| {
+      let a = &shared.sub_enum_a;
+      let b = &shared.sub_enum_b;
 
-    let variants_a_b = shared.variants.iter().map(|v| {
-      let var_name = &v.name;
+      let variants_a_b = shared.variants.iter().map(|v| {
+        let var_name = &v.name;
+        quote::quote! {
+          #a::#var_name(v) => Ok(#b::#var_name(v))
+        }
+      });
+
+      let variants_b_a = shared.variants.iter().map(|v| {
+        let var_name = &v.name;
+        quote::quote! {
+          #b::#var_name(v) => Ok(#a::#var_name(v))
+        }
+      });
+
+      let eror_a_b = format!(
+        "Cannot convert this variant of sub enum `{a}` to sub enum `{b}`."
+      );
+
+      let eror_b_a = format!(
+        "Cannot convert this variant of sub enum `{b}` to sub enum `{a}`."
+      );
+
       quote::quote! {
-        #a::#var_name(v) => Ok(#b::#var_name(v))
-      }
-    });
+        impl TryFrom<#a> for #b {
+          type Error = &'static str;
 
-    let variants_b_a = shared.variants.iter().map(|v| {
-      let var_name = &v.name;
-      quote::quote! {
-        #b::#var_name(v) => Ok(#a::#var_name(v))
-      }
-    });
+          fn try_from(value: #a) -> Result<Self, Self::Error> {
+            match value {
+              #(#variants_a_b),*,
+              _ => Err(#eror_a_b),
+            }
+          }
+        }
 
-    let eror_a_b = format!(
-      "Cannot convert this variant of sub enum `{a}` to sub enum `{b}`."
-    );
+        impl TryFrom<#b> for #a {
+          type Error = &'static str;
 
-    let eror_b_a = format!(
-      "Cannot convert this variant of sub enum `{b}` to sub enum `{a}`."
-    );
-
-    quote::quote! {
-      impl TryFrom<#a> for #b {
-        type Error = &'static str;
-
-        fn try_from(value: #a) -> Result<Self, Self::Error> {
-          match value {
-            #(#variants_a_b),*,
-            _ => Err(#eror_a_b),
+          fn try_from(value: #b) -> Result<Self, Self::Error> {
+            match value {
+              #(#variants_b_a),*,
+              _ => Err(#eror_b_a),
+            }
           }
         }
       }
-
-      impl TryFrom<#b> for #a {
-        type Error = &'static str;
-
-        fn try_from(value: #b) -> Result<Self, Self::Error> {
-          match value {
-            #(#variants_b_a),*,
-            _ => Err(#eror_b_a),
-          }
-        }
-      }
-    }
-  });
-
-  quote::quote! {
-    #(#sub_enums)*
-
-    #(#sub_enum_to_main_impls)*
-
-    #(#main_to_sub_impls)*
-
-    #(#shared_variants)*
-  }
-  .into()
+    })
+    .collect()
 }
 
 /// Holds the final data for creating a sub enum.
@@ -200,13 +209,13 @@ struct SubEnum<'a> {
 
 /// Final representation of a sub enum variant, which includes its name and
 /// the contained type.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 struct Variant {
   pub name: syn::Ident,
   pub contained: syn::Type,
 }
 
-impl<'a> quote::ToTokens for SubEnum<'a> {
+impl quote::ToTokens for SubEnum<'_> {
   fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
     let name = &self.name;
     let defaults = &self.defaults;
@@ -234,16 +243,16 @@ impl quote::ToTokens for Variant {
 }
 
 /// Combine the sub enum declarations with its enum variants
-fn combine_variants(
+fn combine_variants<'a>(
   sub_enums: Vec<SubenumDeclaration>,
-  variants: Vec<variant_attr::SubenumVariant>,
-  defaults: &proc_macro2::TokenStream,
-) -> Vec<SubEnum<'_>> {
+  variants: &[variant_attr::SubenumVariant],
+  defaults: &'a proc_macro2::TokenStream,
+) -> Vec<SubEnum<'a>> {
   sub_enums
     .into_iter()
     .map(|sub_enum| {
       let mut combined_variants = Vec::new();
-      for variant in &variants {
+      for variant in variants {
         if variant.enums.contains(&sub_enum.name) {
           combined_variants.push(Variant {
             name: variant.name.clone(),

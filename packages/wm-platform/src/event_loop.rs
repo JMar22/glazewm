@@ -20,6 +20,11 @@ pub struct EventLoop {
 
 impl EventLoop {
   /// Creates a new event loop and dispatcher.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if the event loop's hidden message window can't be
+  /// created.
   pub fn new() -> crate::Result<(Self, Dispatcher)> {
     let (event_loop, dispatcher) = platform_impl::EventLoop::new()?;
     Ok((
@@ -37,6 +42,11 @@ impl EventLoop {
   ///
   /// - **Windows**: Can be called from any thread. Runs Win32 message
   ///   loop.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if the message window can't be destroyed once the
+  /// loop exits.
   pub fn run(self) -> crate::Result<()> {
     self.inner.run()
   }

@@ -1,3 +1,5 @@
+use crate::int_to_f32;
+
 /// Represents an x-y coordinate.
 #[derive(Debug, Clone)]
 pub struct Point {
@@ -13,7 +15,6 @@ impl Point {
     let dx = self.x - other.x;
     let dy = self.y - other.y;
 
-    #[allow(clippy::cast_precision_loss)]
-    ((dx * dx + dy * dy) as f32).sqrt()
+    int_to_f32(dx * dx + dy * dy).sqrt()
   }
 }

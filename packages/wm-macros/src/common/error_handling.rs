@@ -1,10 +1,7 @@
 //! Utilities for simplifying error handling and diagnostics.
 
 pub mod prelude {
-  // ToSpanError is not used yet, but will be used in the future.
-  // TODO: Remove unused_imports allow
-  #[allow(unused_imports)]
-  pub use super::{ThenError, ToError, ToSpanError};
+  pub use super::{ThenError, ToError};
 }
 
 /// Extends the `bool` type with a method that returns an error if the
@@ -32,9 +29,9 @@ impl<E> ThenError<E> for bool {
 }
 
 /// Extension trait for any type that can be tokenized to create a
-/// [syn::Error] at its location.
+/// [`syn::Error`] at its location.
 pub trait ToError {
-  /// Create a [syn::Error] at the span of this object with the given
+  /// Create a [`syn::Error`] at the span of this object with the given
   /// message.
   ///
   /// # Example
@@ -52,36 +49,5 @@ where
 {
   fn error<D: core::fmt::Display>(&self, message: D) -> syn::Error {
     syn::Error::new_spanned(self, message)
-  }
-}
-
-// Very likely to be used in future.
-// TODO: Remove dead code allow
-#[allow(dead_code)]
-/// Extension trait for any [syn::spanned::Spanned] type that creates a
-/// [syn::Error] at its location. Use [ToError] where possible, as it
-/// creates more accurately spanned errors.
-pub trait ToSpanError {
-  /// Creates a [syn::Error] at the location of this span with the given
-  /// message.
-  ///
-  /// If the object can be tokenized, prefer using [ToError] instead, as it
-  /// gives more accurately spanned errors.
-  ///
-  /// # Example
-  /// ```ignore
-  /// # fn example(stream: syn::parse::ParseStream) -> syn::Result<()> {
-  /// return Err(stream.span().serror("Expected ..."));
-  /// # }
-  /// ```
-  fn serror<D: core::fmt::Display>(&self, message: D) -> syn::Error;
-}
-
-impl<T> ToSpanError for T
-where
-  T: syn::spanned::Spanned,
-{
-  fn serror<D: core::fmt::Display>(&self, message: D) -> syn::Error {
-    syn::Error::new(self.span(), message)
   }
 }

@@ -29,27 +29,29 @@ macro_rules! impl_position_getters_as_resizable {
           TilingDirection::Horizontal => horizontal_gap,
         };
 
-        #[allow(
-          clippy::cast_precision_loss,
-          clippy::cast_possible_truncation,
-          clippy::cast_possible_wrap
-        )]
+        let sibling_count = i32::try_from(self.tiling_siblings().count())?;
+
         let (width, height) = match parent.tiling_direction() {
           TilingDirection::Vertical => {
-            let available_height = parent_rect.height()
-              - inner_gap * self.tiling_siblings().count() as i32;
+            let available_height =
+              parent_rect.height() - inner_gap * sibling_count;
 
-            let height =
-              (self.tiling_size() * available_height as f32) as i32;
+            let height = wm_platform::f32_to_int(
+              self.tiling_size()
+                * wm_platform::int_to_f32(available_height),
+            );
 
             (parent_rect.width(), height)
           }
           TilingDirection::Horizontal => {
-            let available_width = parent_rect.width()
-              - inner_gap * self.tiling_siblings().count() as i32;
+            let available_width =
+              parent_rect.width() - inner_gap * sibling_count;
 
-            let width =
-              (available_width as f32 * self.tiling_size()).round() as i32;
+            let width = wm_platform::f32_to_int(
+              (wm_platform::int_to_f32(available_width)
+                * self.tiling_size())
+              .round(),
+            );
 
             (width, parent_rect.height())
           }

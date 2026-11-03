@@ -17,9 +17,11 @@ use tracing_subscriber::{
   fmt::{self, writer::MakeWriterExt},
   layer::SubscriberExt,
 };
-use wm_common::{AppCommand, InvokeCommand, Verbosity, WmEvent};
+use wm_common::{
+  AppCommand, BindingModeConfig, InvokeCommand, Verbosity, WmEvent,
+};
 use wm_platform::{
-  Dispatcher, DisplayListener, EventLoop, KeybindingListener,
+  Dispatcher, DisplayListener, EventLoop, Keybinding, KeybindingListener,
   MouseEventKind, MouseListener, PlatformEvent, SingleInstance,
   WindowListener,
 };
@@ -98,7 +100,6 @@ fn main() -> anyhow::Result<()> {
   }
 }
 
-#[allow(clippy::too_many_lines)]
 async fn start_wm(
   config_path: Option<PathBuf>,
   verbosity: Verbosity,
@@ -121,67 +122,69 @@ async fn start_wm(
 
   // Start watcher process for restoring hidden windows on crash.
   #[cfg(target_os = "windows")]
-  if let Err(err) = start_watcher_process() {
-    tracing::warn!(
-      "Failed to start watcher process: {err}{}",
-      cfg!(debug_assertions)
-        .then_some(".\n Run `cargo build -p wm-watcher` to build it.")
-        .unwrap_or_default()
-    );
-  }
+  start_watcher();
 
   // Start listening for platform events after populating initial state.
-  let mut window_listener = WindowListener::new(dispatcher)?;
-  let mut display_listener = DisplayListener::new(dispatcher)?;
-  let mut mouse_listener = MouseListener::new(
-    if config.value.general.focus_follows_cursor {
-      &[MouseEventKind::Move, MouseEventKind::LeftButtonUp]
-    } else {
-      &[MouseEventKind::LeftButtonUp]
-    },
-    dispatcher,
-  )?;
-  let mut keybinding_listener = KeybindingListener::new(
-    &config
-      .active_keybinding_configs(&[], false)
-      .flat_map(|kb| kb.bindings)
-      .collect::<Vec<_>>(),
-    dispatcher,
-  )?;
+  let mut listeners = Listeners::new(&config, dispatcher)?;
 
-  // Run user's startup commands.
-  if let Err(err) = wm.process_commands(
-    &config.value.general.startup_commands.clone(),
-    None,
+  run_startup_commands(&mut wm, &mut config, dispatcher);
+
+  run_event_loop(
+    &mut wm,
     &mut config,
-  ) {
-    tracing::error!("{:?}", err);
-    dispatcher.show_error_dialog("Non-fatal error", &err.to_string());
+    &mut tray,
+    &mut ipc_server,
+    &mut listeners,
+    dispatcher,
+  )
+  .await?;
+
+  tracing::info!("Window manager shutting down.");
+  wm.cleanup(&mut config, &mut ipc_server);
+
+  Ok(())
+}
+
+/// Platform event listeners that feed the event loop.
+struct Listeners {
+  window: WindowListener,
+  display: DisplayListener,
+  mouse: MouseListener,
+  keybinding: KeybindingListener,
+}
+
+impl Listeners {
+  fn new(
+    config: &UserConfig,
+    dispatcher: &Dispatcher,
+  ) -> anyhow::Result<Self> {
+    Ok(Self {
+      window: WindowListener::new(dispatcher)?,
+      display: DisplayListener::new(dispatcher)?,
+      mouse: MouseListener::new(mouse_events(config), dispatcher)?,
+      keybinding: KeybindingListener::new(
+        &active_keybindings(config, &[]),
+        dispatcher,
+      )?,
+    })
   }
+}
 
-  // Create an interval for periodically cleaning up invalid windows.
-  let mut cleanup_interval = tokio::time::interval(Duration::from_secs(5));
-  cleanup_interval
-    .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-
-  // Create an interval for recovering keyboard focus stranded on the
-  // Windows shell. Dismissing a taskbar flyout can leave focus nowhere
-  // without emitting any foreground event, so that state has to be polled
-  // for. Kept short, since the desktop is unusable until it resolves.
-  let mut focus_reconcile_interval =
-    tokio::time::interval(Duration::from_secs(1));
-  focus_reconcile_interval
-    .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-
-  // Create an interval for putting the taskbar back behind a fullscreen
-  // window after something raises it. Kept short because the taskbar is
-  // drawn over the window until it fires, and the check costs nothing
-  // while no window is covering the taskbar, which is nearly all of the
-  // time.
-  let mut taskbar_reconcile_interval =
-    tokio::time::interval(Duration::from_millis(500));
-  taskbar_reconcile_interval
-    .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+/// Handles platform events, timers, IPC messages and WM events until the
+/// WM is told to exit.
+///
+/// Errors from handling an event are reported without stopping the loop.
+/// The loop itself stops with an error only if the mouse listener can't be
+/// updated for a config change.
+async fn run_event_loop(
+  wm: &mut WindowManager,
+  config: &mut UserConfig,
+  tray: &mut SystemTray,
+  ipc_server: &mut IpcServer,
+  listeners: &mut Listeners,
+  dispatcher: &Dispatcher,
+) -> anyhow::Result<()> {
+  let mut timers = Timers::new();
 
   loop {
     let res = tokio::select! {
@@ -197,29 +200,31 @@ async fn start_wm(
         tracing::info!("Exiting through system tray.");
         break;
       },
-      Some(event) = mouse_listener.next_event() => {
+      Some(event) = listeners.mouse.next_event() => {
         tracing::debug!("Received mouse event: {:?}", event);
-        wm.process_event(PlatformEvent::Mouse(event), &mut config)
+        wm.process_event(PlatformEvent::Mouse(event), config)
       },
-      Some(event) = window_listener.next_event() => {
+      Some(event) = listeners.window.next_event() => {
         tracing::debug!("Received window event: {:?}", event);
-        wm.process_event(PlatformEvent::Window(event), &mut config)
+        wm.process_event(PlatformEvent::Window(event), config)
       },
-      Some(()) = display_listener.next_event() => {
+      Some(()) = listeners.display.next_event() => {
         tracing::debug!("Received display settings changed event.");
-        wm.process_event(PlatformEvent::DisplaySettingsChanged, &mut config)
+        wm.process_event(PlatformEvent::DisplaySettingsChanged, config)
       },
-      Some(event) = keybinding_listener.next_event() => {
+      Some(event) = listeners.keybinding.next_event() => {
         tracing::debug!("Received keyboard event: {:?}", event);
-        wm.process_event(PlatformEvent::Keybinding(event), &mut config)
+        wm.process_event(PlatformEvent::Keybinding(event), config)
       }
-      _ = focus_reconcile_interval.tick() => {
-        reconcile_stranded_focus(&mut wm.state, &config)
+      _ = timers.focus_reconcile.tick() => {
+        reconcile_stranded_focus(&mut wm.state, config);
+        Ok(())
       },
-      _ = taskbar_reconcile_interval.tick() => {
-        reconcile_stranded_taskbar(&wm.state)
+      _ = timers.taskbar_reconcile.tick() => {
+        reconcile_stranded_taskbar(&wm.state);
+        Ok(())
       },
-      _ = cleanup_interval.tick() => {
+      _ = timers.cleanup.tick() => {
         if wm.state.is_paused {
           Ok(())
         } else {
@@ -237,8 +242,8 @@ async fn start_wm(
           message,
           &response_tx,
           &disconnection_tx,
-          &mut wm,
-          &mut config,
+          wm,
+          config,
         ) {
           tracing::error!("{:?}", err);
         }
@@ -248,33 +253,13 @@ async fn start_wm(
       Some(wm_event) = wm.event_rx.recv() => {
         tracing::debug!("Received WM event: {:?}", wm_event);
 
-        // Disable mouse listener when the WM is paused.
-        if let WmEvent::PauseChanged { is_paused } = wm_event {
-          let _ = mouse_listener.enable(!is_paused);
-        }
-
-        // Update keybinding and mouse listeners on config changes.
-        if matches!(
-          wm_event,
-          WmEvent::UserConfigChanged { .. }
-            | WmEvent::BindingModesChanged { .. }
-            | WmEvent::PauseChanged { .. }
-        ) {
-          keybinding_listener.update(
-            &config
-              .active_keybinding_configs(&wm.state.binding_modes, false)
-              .flat_map(|kb| kb.bindings)
-              .collect::<Vec<_>>(),
-          );
-
-          mouse_listener.set_enabled_events(
-            if config.value.general.focus_follows_cursor {
-              &[MouseEventKind::Move, MouseEventKind::LeftButtonUp]
-            } else {
-              &[MouseEventKind::LeftButtonUp]
-            },
-          )?;
-        }
+        update_listeners(
+          &wm_event,
+          config,
+          &wm.state.binding_modes,
+          &mut listeners.mouse,
+          &listeners.keybinding,
+        )?;
 
         if let Err(err) = ipc_server.process_event(wm_event) {
           tracing::error!("{:?}", err);
@@ -286,7 +271,7 @@ async fn start_wm(
         wm.process_commands(
           &vec![InvokeCommand::WmReloadConfig],
           None,
-          &mut config,
+          config,
         ).map(|_| ())
       },
     };
@@ -297,10 +282,122 @@ async fn start_wm(
     }
   }
 
-  tracing::info!("Window manager shutting down.");
-  wm.cleanup(&mut config, &mut ipc_server);
+  Ok(())
+}
+
+/// Runs the user's startup commands, reporting a failure without stopping
+/// the WM.
+fn run_startup_commands(
+  wm: &mut WindowManager,
+  config: &mut UserConfig,
+  dispatcher: &Dispatcher,
+) {
+  if let Err(err) = wm.process_commands(
+    &config.value.general.startup_commands.clone(),
+    None,
+    config,
+  ) {
+    tracing::error!("{:?}", err);
+    dispatcher.show_error_dialog("Non-fatal error", &err.to_string());
+  }
+}
+
+/// Timers for the event loop's periodic checks.
+struct Timers {
+  /// Cleans up invalid windows.
+  cleanup: tokio::time::Interval,
+
+  /// Recovers keyboard focus stranded on the Windows shell. Dismissing a
+  /// taskbar flyout can leave focus nowhere without emitting any
+  /// foreground event, so that state has to be polled for. Kept short,
+  /// since the desktop is unusable until it resolves.
+  focus_reconcile: tokio::time::Interval,
+
+  /// Puts the taskbar back behind a fullscreen window after something
+  /// raises it. Kept short because the taskbar is drawn over the window
+  /// until it fires, and the check costs nothing while no window is
+  /// covering the taskbar, which is nearly all of the time.
+  taskbar_reconcile: tokio::time::Interval,
+}
+
+impl Timers {
+  fn new() -> Self {
+    Self {
+      cleanup: interval(Duration::from_secs(5)),
+      focus_reconcile: interval(Duration::from_secs(1)),
+      taskbar_reconcile: interval(Duration::from_millis(500)),
+    }
+  }
+}
+
+/// Creates a timer for a periodic task. Ticks missed while the event loop
+/// is busy are skipped rather than run back to back.
+fn interval(period: Duration) -> tokio::time::Interval {
+  let mut interval = tokio::time::interval(period);
+  interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+  interval
+}
+
+/// Mouse events to listen for under the given config.
+fn mouse_events(config: &UserConfig) -> &'static [MouseEventKind] {
+  if config.value.general.focus_follows_cursor {
+    &[MouseEventKind::Move, MouseEventKind::LeftButtonUp]
+  } else {
+    &[MouseEventKind::LeftButtonUp]
+  }
+}
+
+/// Keybindings to listen for with the given binding modes active.
+fn active_keybindings(
+  config: &UserConfig,
+  binding_modes: &[BindingModeConfig],
+) -> Vec<Keybinding> {
+  config
+    .active_keybinding_configs(binding_modes, false)
+    .flat_map(|kb| kb.bindings)
+    .collect()
+}
+
+/// Updates the mouse and keybinding listeners for a WM event that changes
+/// what they should listen for.
+fn update_listeners(
+  wm_event: &WmEvent,
+  config: &UserConfig,
+  binding_modes: &[BindingModeConfig],
+  mouse_listener: &mut MouseListener,
+  keybinding_listener: &KeybindingListener,
+) -> anyhow::Result<()> {
+  // Disable mouse listener when the WM is paused.
+  if let WmEvent::PauseChanged { is_paused } = wm_event {
+    let _ = mouse_listener.enable(!is_paused);
+  }
+
+  // Update keybinding and mouse listeners on config changes.
+  if matches!(
+    wm_event,
+    WmEvent::UserConfigChanged { .. }
+      | WmEvent::BindingModesChanged { .. }
+      | WmEvent::PauseChanged { .. }
+  ) {
+    keybinding_listener.update(&active_keybindings(config, binding_modes));
+    mouse_listener.set_enabled_events(mouse_events(config))?;
+  }
 
   Ok(())
+}
+
+/// Starts the watcher process that restores hidden windows if the WM
+/// crashes. A failure to start it is logged rather than returned.
+#[cfg(target_os = "windows")]
+fn start_watcher() {
+  if let Err(err) = start_watcher_process() {
+    tracing::warn!(
+      "Failed to start watcher process: {err}{}",
+      cfg!(debug_assertions)
+        .then_some(".\n Run `cargo build -p wm-watcher` to build it.")
+        .unwrap_or_default()
+    );
+  }
 }
 
 /// Initialize logging with the specified verbosity level.
@@ -342,7 +439,6 @@ fn setup_logging(verbosity: &Verbosity) -> anyhow::Result<()> {
 ///
 /// This assumes the watcher binary exists in the same directory as the
 /// WM binary.
-#[allow(unused)]
 fn start_watcher_process() -> anyhow::Result<tokio::process::Child, Error>
 {
   let watcher_path = env::current_exe()?

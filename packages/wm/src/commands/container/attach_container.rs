@@ -1,4 +1,5 @@
 use anyhow::bail;
+use wm_platform::int_to_f32;
 
 use super::resize_tiling_container;
 use crate::{
@@ -47,8 +48,7 @@ pub fn attach_container(
 
     // Set initial tiling size to 0, and then size up the container
     // to the target size.
-    #[allow(clippy::cast_precision_loss)]
-    let target_size = 1.0 / (tiling_siblings.len() + 1) as f32;
+    let target_size = 1.0 / int_to_f32(tiling_siblings.len() + 1);
     child.set_tiling_size(0.0);
     resize_tiling_container(&child, target_size);
   }

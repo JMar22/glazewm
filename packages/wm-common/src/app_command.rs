@@ -6,7 +6,7 @@ use tracing::Level;
 use uuid::Uuid;
 use wm_platform::{Delta, Direction, LengthValue, OpacityValue};
 
-use crate::TilingDirection;
+use crate::{InvokeFocusCommand, InvokeMoveCommand, TilingDirection};
 
 const VERSION: &str = env!("VERSION_NUMBER");
 
@@ -304,94 +304,6 @@ pub struct InvokeAdjustBordersCommand {
 
   #[clap(long, allow_hyphen_values = true)]
   pub left: Option<LengthValue>,
-}
-
-#[derive(Args, Clone, Debug, PartialEq, Serialize)]
-#[group(required = true, multiple = false)]
-#[allow(clippy::struct_excessive_bools)]
-pub struct InvokeFocusCommand {
-  #[clap(long)]
-  pub direction: Option<Direction>,
-
-  /// Focus the next window with the same state in the current workspace.
-  #[clap(long)]
-  pub next_window: bool,
-
-  /// Focus the previous window with the same state in the current
-  /// workspace.
-  #[clap(long)]
-  pub prev_window: bool,
-
-  #[clap(long)]
-  pub container_id: Option<Uuid>,
-
-  #[clap(long)]
-  pub workspace_in_direction: Option<Direction>,
-
-  #[clap(long)]
-  pub workspace: Option<String>,
-
-  #[clap(long)]
-  pub monitor: Option<usize>,
-
-  #[clap(long)]
-  pub next_active_workspace: bool,
-
-  #[clap(long)]
-  pub prev_active_workspace: bool,
-
-  #[clap(long)]
-  pub next_workspace: bool,
-
-  #[clap(long)]
-  pub prev_workspace: bool,
-
-  #[clap(long)]
-  pub next_active_workspace_on_monitor: bool,
-
-  #[clap(long)]
-  pub prev_active_workspace_on_monitor: bool,
-
-  #[clap(long)]
-  pub recent_workspace: bool,
-}
-
-#[derive(Args, Clone, Debug, PartialEq, Serialize)]
-#[group(required = true, multiple = false)]
-#[allow(clippy::struct_excessive_bools)]
-pub struct InvokeMoveCommand {
-  /// Direction to move the window.
-  #[clap(long)]
-  pub direction: Option<Direction>,
-
-  /// Move window to workspace in specified direction.
-  #[clap(long)]
-  pub workspace_in_direction: Option<Direction>,
-
-  /// Name of workspace to move the window.
-  #[clap(long)]
-  pub workspace: Option<String>,
-
-  #[clap(long)]
-  pub next_active_workspace: bool,
-
-  #[clap(long)]
-  pub prev_active_workspace: bool,
-
-  #[clap(long)]
-  pub next_workspace: bool,
-
-  #[clap(long)]
-  pub prev_workspace: bool,
-
-  #[clap(long)]
-  pub next_active_workspace_on_monitor: bool,
-
-  #[clap(long)]
-  pub prev_active_workspace_on_monitor: bool,
-
-  #[clap(long)]
-  pub recent_workspace: bool,
 }
 
 #[derive(Args, Clone, Debug, PartialEq, Serialize)]

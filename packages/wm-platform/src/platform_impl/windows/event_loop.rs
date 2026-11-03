@@ -89,11 +89,7 @@ impl EventLoopSource {
     }
   }
 
-  #[allow(clippy::unnecessary_wraps)]
-  pub(crate) fn send_dispatch_sync<F>(
-    &self,
-    dispatch_fn: F,
-  ) -> crate::Result<()>
+  pub(crate) fn send_dispatch_sync<F>(&self, dispatch_fn: F)
   where
     F: FnOnce() + Send,
   {
@@ -112,8 +108,6 @@ impl EventLoopSource {
         LPARAM(0),
       );
     }
-
-    Ok(())
   }
 
   pub(crate) fn send_stop(&self) -> crate::Result<()> {

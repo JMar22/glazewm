@@ -23,10 +23,10 @@ use windows::{
       WindowsAndMessaging::{
         EnumWindows, GetAncestor, GetClassNameW, GetDesktopWindow,
         GetForegroundWindow, GetLayeredWindowAttributes, GetShellWindow,
-        GetWindow, GetWindowLongPtrW, GetWindowRect, GetWindowTextW,
+        GetWindow, GetWindowLongW, GetWindowRect, GetWindowTextW,
         GetWindowThreadProcessId, IsIconic, IsWindow, IsWindowVisible,
         IsZoomed, SendNotifyMessageW, SetForegroundWindow,
-        SetLayeredWindowAttributes, SetWindowLongPtrW, SetWindowPlacement,
+        SetLayeredWindowAttributes, SetWindowLongW, SetWindowPlacement,
         SetWindowPos, ShowWindowAsync, WindowFromPoint, GA_ROOT,
         GWL_EXSTYLE, GWL_STYLE, GW_HWNDPREV, GW_OWNER, HWND_NOTOPMOST,
         HWND_TOP, HWND_TOPMOST, LAYERED_WINDOW_ATTRIBUTES_FLAGS,
@@ -42,7 +42,10 @@ use windows::{
   },
 };
 
-use super::com::{IApplicationView, COM_INIT};
+use super::{
+  com::{IApplicationView, COM_INIT},
+  size_of_u32,
+};
 use crate::{
   Color, CornerStyle, Delta, Dispatcher, LengthValue, OpacityValue, Point,
   Rect, RectDelta, WindowId, WindowZOrder,
@@ -72,13 +75,15 @@ impl NativeWindow {
   }
 
   /// Implements [`NativeWindow::title`].
-  #[allow(clippy::unnecessary_wraps)]
-  pub(crate) fn title(&self) -> crate::Result<String> {
+  ///
+  /// `GetWindowTextW` returns zero both for an empty title and on failure,
+  /// so a window that no longer exists reads as having an empty title.
+  pub(crate) fn title(&self) -> String {
     let mut text: [u16; 512] = [0; 512];
     let length = unsafe { GetWindowTextW(self.hwnd(), &mut text) };
+    let length = usize::try_from(length).unwrap_or(0);
 
-    #[allow(clippy::cast_sign_loss)]
-    Ok(String::from_utf16_lossy(&text[..length as usize]))
+    String::from_utf16_lossy(&text[..length])
   }
 
   /// Implements [`NativeWindow::process_name`].
@@ -127,12 +132,11 @@ impl NativeWindow {
     let mut rect = RECT::default();
 
     let dwm_res = unsafe {
-      #[allow(clippy::cast_possible_truncation)]
       DwmGetWindowAttribute(
         self.hwnd(),
         DWMWA_EXTENDED_FRAME_BOUNDS,
         std::ptr::from_mut(&mut rect).cast(),
-        std::mem::size_of::<RECT>() as u32,
+        size_of_u32::<RECT>()?,
       )
     };
 
@@ -177,27 +181,23 @@ impl NativeWindow {
   }
 
   /// Implements [`NativeWindow::is_minimized`].
-  #[allow(clippy::unnecessary_wraps)]
-  pub(crate) fn is_minimized(&self) -> crate::Result<bool> {
-    Ok(unsafe { IsIconic(self.hwnd()) }.as_bool())
+  pub(crate) fn is_minimized(&self) -> bool {
+    unsafe { IsIconic(self.hwnd()) }.as_bool()
   }
 
   /// Implements [`NativeWindow::is_maximized`].
-  #[allow(clippy::unnecessary_wraps)]
-  pub(crate) fn is_maximized(&self) -> crate::Result<bool> {
-    Ok(unsafe { IsZoomed(self.hwnd()) }.as_bool())
+  pub(crate) fn is_maximized(&self) -> bool {
+    unsafe { IsZoomed(self.hwnd()) }.as_bool()
   }
 
   /// Implements [`NativeWindow::is_resizable`].
-  #[allow(clippy::unnecessary_wraps)]
-  pub(crate) fn is_resizable(&self) -> crate::Result<bool> {
-    Ok(self.has_window_style(WS_THICKFRAME))
+  pub(crate) fn is_resizable(&self) -> bool {
+    self.has_window_style(WS_THICKFRAME)
   }
 
   /// Implements [`NativeWindow::is_desktop_window`].
-  #[allow(clippy::unnecessary_wraps)]
-  pub(crate) fn is_desktop_window(&self) -> crate::Result<bool> {
-    Ok(*self == desktop_window())
+  pub(crate) fn is_desktop_window(&self) -> bool {
+    *self == desktop_window()
   }
 
   /// Implements [`NativeWindow::set_frame`].
@@ -298,10 +298,8 @@ impl NativeWindow {
 
     // Bypass restriction for setting the foreground window by sending an
     // input to our own process first.
-    #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
-    unsafe {
-      SendInput(&input, std::mem::size_of::<INPUT>() as i32)
-    };
+    let input_size = i32::try_from(std::mem::size_of::<INPUT>())?;
+    unsafe { SendInput(&input, input_size) };
 
     // Set as the foreground window. Windows only grants the foreground to
     // the process that last received input, so this is refused whenever
@@ -341,8 +339,8 @@ impl NativeWindow {
       return Err(windows::core::Error::from_win32().into());
     }
 
-    #[allow(clippy::cast_sign_loss)]
-    let class_name = String::from_utf16_lossy(&buffer[..result as usize]);
+    let length = usize::try_from(result)?;
+    let class_name = String::from_utf16_lossy(&buffer[..length]);
     Ok(class_name)
   }
 
@@ -391,12 +389,7 @@ impl NativeWindow {
 
   /// Implements [`NativeWindowWindowsExt::has_window_style`].
   pub(crate) fn has_window_style(&self, style: WINDOW_STYLE) -> bool {
-    let current_style =
-      unsafe { GetWindowLongPtrW(self.hwnd(), GWL_STYLE) };
-
-    #[allow(clippy::cast_possible_wrap)]
-    let style = style.0 as isize;
-    (current_style & style) != 0
+    self.style() & style.0 != 0
   }
 
   /// Implements [`NativeWindowWindowsExt::has_window_style_ex`].
@@ -404,12 +397,20 @@ impl NativeWindow {
     &self,
     style: WINDOW_EX_STYLE,
   ) -> bool {
-    let current_style =
-      unsafe { GetWindowLongPtrW(self.hwnd(), GWL_EXSTYLE) };
+    self.style_ex() & style.0 != 0
+  }
 
-    #[allow(clippy::cast_possible_wrap)]
-    let style = style.0 as isize;
-    (current_style & style) != 0
+  /// Gets the window's style flags (`GWL_STYLE`).
+  ///
+  /// Window styles are 32-bit, so the `GetWindowLongW` value is the flags'
+  /// bit pattern read as signed.
+  fn style(&self) -> u32 {
+    unsafe { GetWindowLongW(self.hwnd(), GWL_STYLE) }.cast_unsigned()
+  }
+
+  /// Gets the window's extended style flags (`GWL_EXSTYLE`).
+  fn style_ex(&self) -> u32 {
+    unsafe { GetWindowLongW(self.hwnd(), GWL_EXSTYLE) }.cast_unsigned()
   }
 
   /// Implements [`NativeWindowWindowsExt::set_window_pos`].
@@ -465,8 +466,7 @@ impl NativeWindow {
       }
       Some(rect) => {
         let placement = WINDOWPLACEMENT {
-          #[allow(clippy::cast_possible_truncation)]
-          length: std::mem::size_of::<WINDOWPLACEMENT>() as u32,
+          length: size_of_u32::<WINDOWPLACEMENT>()?,
           flags: WPF_ASYNCWINDOWPLACEMENT,
           showCmd: SW_RESTORE.0 as u32,
           rcNormalPosition: RECT {
@@ -531,13 +531,10 @@ impl NativeWindow {
   }
 
   /// Implements [`NativeWindowWindowsExt::window_above`].
-  #[allow(clippy::unnecessary_wraps)]
-  pub(crate) fn window_above(
-    &self,
-  ) -> crate::Result<Option<crate::NativeWindow>> {
+  pub(crate) fn window_above(&self) -> Option<crate::NativeWindow> {
     let handle = unsafe { GetWindow(self.hwnd(), GW_HWNDPREV) };
 
-    Ok((handle.0 != 0).then(|| NativeWindow::new(handle.0).into()))
+    (handle.0 != 0).then(|| NativeWindow::new(handle.0).into())
   }
 
   /// Implements [`NativeWindowWindowsExt::set_taskbar_visibility`].
@@ -562,14 +559,14 @@ impl NativeWindow {
 
   /// Implements [`NativeWindowWindowsExt::add_window_style_ex`].
   pub(crate) fn add_window_style_ex(&self, style: WINDOW_EX_STYLE) {
-    let current_style =
-      unsafe { GetWindowLongPtrW(self.hwnd(), GWL_EXSTYLE) };
+    let current_style = self.style_ex();
 
-    #[allow(clippy::cast_possible_wrap)]
-    if current_style & style.0 as isize == 0 {
-      let new_style = current_style | style.0 as isize;
+    if current_style & style.0 == 0 {
+      let new_style = current_style | style.0;
 
-      unsafe { SetWindowLongPtrW(self.hwnd(), GWL_EXSTYLE, new_style) };
+      unsafe {
+        SetWindowLongW(self.hwnd(), GWL_EXSTYLE, new_style.cast_signed())
+      };
     }
   }
 
@@ -611,18 +608,17 @@ impl NativeWindow {
     &self,
     visible: bool,
   ) -> crate::Result<()> {
-    let style = unsafe { GetWindowLongPtrW(self.hwnd(), GWL_STYLE) };
+    let style = self.style();
 
-    #[allow(clippy::cast_possible_wrap)]
     let new_style = if visible {
-      style | (WS_DLGFRAME.0 as isize)
+      style | WS_DLGFRAME.0
     } else {
-      style & !(WS_DLGFRAME.0 as isize)
+      style & !WS_DLGFRAME.0
     };
 
     if new_style != style {
       unsafe {
-        SetWindowLongPtrW(self.hwnd(), GWL_STYLE, new_style);
+        SetWindowLongW(self.hwnd(), GWL_STYLE, new_style.cast_signed());
         SetWindowPos(
           self.hwnd(),
           HWND_NOTOPMOST,
@@ -657,12 +653,11 @@ impl NativeWindow {
     };
 
     unsafe {
-      #[allow(clippy::cast_possible_truncation)]
       DwmSetWindowAttribute(
         self.hwnd(),
         DWMWA_BORDER_COLOR,
         std::ptr::from_ref(&bgr).cast(),
-        std::mem::size_of::<u32>() as u32,
+        size_of_u32::<u32>()?,
       )?;
     }
 
@@ -682,12 +677,11 @@ impl NativeWindow {
     };
 
     unsafe {
-      #[allow(clippy::cast_possible_truncation)]
       DwmSetWindowAttribute(
         self.hwnd(),
         DWMWA_WINDOW_CORNER_PREFERENCE,
         std::ptr::from_ref(&(corner_preference.0)).cast(),
-        std::mem::size_of::<i32>() as u32,
+        size_of_u32::<i32>()?,
       )?;
     }
 
@@ -755,12 +749,11 @@ impl NativeWindow {
     let mut cloaked = 0u32;
 
     unsafe {
-      #[allow(clippy::cast_possible_truncation)]
       DwmGetWindowAttribute(
         self.hwnd(),
         DWMWA_CLOAKED,
         std::ptr::from_mut::<u32>(&mut cloaked).cast(),
-        std::mem::size_of::<u32>() as u32,
+        size_of_u32::<u32>()?,
       )
     }?;
 
@@ -786,9 +779,6 @@ impl From<NativeWindow> for crate::NativeWindow {
 pub(crate) fn visible_windows(
   _: &Dispatcher,
 ) -> crate::Result<Vec<crate::NativeWindow>> {
-  let mut handles: Vec<isize> = Vec::new();
-
-  #[allow(clippy::items_after_statements)]
   extern "system" fn visible_windows_proc(
     handle: HWND,
     data: LPARAM,
@@ -797,6 +787,8 @@ pub(crate) fn visible_windows(
     unsafe { (*handles).push(handle.0) };
     true.into()
   }
+
+  let mut handles: Vec<isize> = Vec::new();
 
   unsafe {
     EnumWindows(
@@ -816,20 +808,16 @@ pub(crate) fn visible_windows(
 }
 
 /// Implements [`Dispatcher::focused_window`].
-#[allow(clippy::unnecessary_wraps)]
-pub(crate) fn focused_window(
-  _: &Dispatcher,
-) -> crate::Result<crate::NativeWindow> {
+pub(crate) fn focused_window(_: &Dispatcher) -> crate::NativeWindow {
   let handle = unsafe { GetForegroundWindow() };
-  Ok(NativeWindow::new(handle.0).into())
+  NativeWindow::new(handle.0).into()
 }
 
 /// Implements [`Dispatcher::window_from_point`].
-#[allow(clippy::unnecessary_wraps)]
 pub(crate) fn window_from_point(
   point: &Point,
   _: &Dispatcher,
-) -> crate::Result<Option<crate::NativeWindow>> {
+) -> Option<crate::NativeWindow> {
   let point = POINT {
     x: point.x,
     y: point.y,
@@ -837,15 +825,15 @@ pub(crate) fn window_from_point(
 
   let handle = unsafe { WindowFromPoint(point) };
   if handle.0 == 0 {
-    return Ok(None);
+    return None;
   }
 
   let root = unsafe { GetAncestor(handle, GA_ROOT) };
   if root.0 == 0 {
-    return Ok(None);
+    return None;
   }
 
-  Ok(Some(NativeWindow::new(root.0).into()))
+  Some(NativeWindow::new(root.0).into())
 }
 
 /// Implements [`Dispatcher::reset_focus`].

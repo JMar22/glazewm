@@ -60,31 +60,61 @@ impl Display {
   }
 
   /// Gets the display name.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if `GetMonitorInfoW` fails, e.g. because the display
+  /// was disconnected.
   pub fn name(&self) -> crate::Result<String> {
     self.inner.name()
   }
 
   /// Gets the full bounds rectangle of the display.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if `GetMonitorInfoW` fails, e.g. because the display
+  /// was disconnected.
   pub fn bounds(&self) -> crate::Result<Rect> {
     self.inner.bounds()
   }
 
   /// Gets the working area rectangle (excluding system UI).
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if `GetMonitorInfoW` fails, e.g. because the display
+  /// was disconnected.
   pub fn working_area(&self) -> crate::Result<Rect> {
     self.inner.working_area()
   }
 
   /// Gets the scale factor for the display.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if the display's DPI can't be read (see
+  /// [`Display::dpi`]).
   pub fn scale_factor(&self) -> crate::Result<f32> {
     self.inner.scale_factor()
   }
 
   /// Gets the DPI for the display.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if `GetDpiForMonitor` fails, e.g. because the
+  /// display was disconnected.
   pub fn dpi(&self) -> crate::Result<u32> {
     self.inner.dpi()
   }
 
   /// Returns whether this is the primary display.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if `GetMonitorInfoW` fails, e.g. because the display
+  /// was disconnected.
   pub fn is_primary(&self) -> crate::Result<bool> {
     self.inner.is_primary()
   }
@@ -94,11 +124,23 @@ impl Display {
   /// A single display can be associated with multiple display devices. For
   /// example, when mirroring a display or combining multiple displays
   /// (e.g. using NVIDIA Surround).
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if `GetMonitorInfoW` fails, e.g. because the display
+  /// was disconnected.
   pub fn devices(&self) -> crate::Result<Vec<DisplayDevice>> {
     self.inner.devices()
   }
 
   /// Gets the main device (first non-mirroring device) for this display.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if the display's devices can't be read (see
+  /// [`Display::devices`]), or
+  /// [`Error::DisplayDeviceNotFound`](crate::Error::DisplayDeviceNotFound)
+  /// if none of them qualifies.
   pub fn main_device(&self) -> crate::Result<DisplayDevice> {
     self.inner.main_device()
   }
@@ -178,10 +220,13 @@ pub trait DisplayDeviceExtWindows {
 
   /// Gets the output technology.
   ///
+  /// Detection is not implemented yet, so this always reports
+  /// [`OutputTechnology::Unknown`].
+  ///
   /// # Platform-specific
   ///
   /// This method is only available on Windows.
-  fn output_technology(&self) -> crate::Result<Option<OutputTechnology>>;
+  fn output_technology(&self) -> Option<OutputTechnology>;
 }
 
 #[cfg(target_os = "windows")]
@@ -194,8 +239,9 @@ impl DisplayDeviceExtWindows for DisplayDevice {
     self.inner.hardware_id()
   }
 
-  fn output_technology(&self) -> crate::Result<Option<OutputTechnology>> {
-    self.inner.output_technology()
+  fn output_technology(&self) -> Option<OutputTechnology> {
+    // TODO: Use `DisplayConfigGetDeviceInfo` to get the output technology.
+    Some(OutputTechnology::Unknown)
   }
 }
 
@@ -216,11 +262,21 @@ impl DisplayDevice {
   }
 
   /// Gets the rotation of the device in degrees.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if the device's current display mode can't be read
+  /// with `EnumDisplaySettingsW`.
   pub fn rotation(&self) -> crate::Result<f32> {
     self.inner.rotation()
   }
 
   /// Gets the refresh rate of the device in Hz.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if the device's current display mode can't be read
+  /// with `EnumDisplaySettingsW`.
   pub fn refresh_rate(&self) -> crate::Result<f32> {
     self.inner.refresh_rate()
   }
@@ -228,18 +284,33 @@ impl DisplayDevice {
   /// Gets whether this is a built-in display.
   ///
   /// Returns `true` for embedded displays (like laptop screens).
-  pub fn is_builtin(&self) -> crate::Result<bool> {
-    self.inner.is_builtin()
+  ///
+  /// Detection is not implemented yet, so this always returns `false`.
+  #[must_use]
+  pub fn is_builtin(&self) -> bool {
+    // TODO: Use `DisplayConfigGetDeviceInfo` to determine whether the
+    // output technology is internal.
+    false
   }
 
   /// Gets the connection state of the device.
-  pub fn connection_state(&self) -> crate::Result<ConnectionState> {
-    self.inner.connection_state()
+  ///
+  /// Detection is not implemented yet, so this always reports
+  /// [`ConnectionState::Active`].
+  #[must_use]
+  pub fn connection_state(&self) -> ConnectionState {
+    // TODO: Detect disconnected state.
+    ConnectionState::Active
   }
 
   /// Gets the mirroring state of the device.
-  pub fn mirroring_state(&self) -> crate::Result<Option<MirroringState>> {
-    self.inner.mirroring_state()
+  ///
+  /// Detection is not implemented yet, so this always returns `None`.
+  #[must_use]
+  pub fn mirroring_state(&self) -> Option<MirroringState> {
+    // TODO: Implement mirroring detection using
+    // `DisplayConfigGetDeviceInfo`.
+    None
   }
 }
 
@@ -263,7 +334,8 @@ mod tests {
     });
 
     event_loop.run().unwrap();
+    // A display is always returned; it should be a live one.
     let display = thread.join().unwrap();
-    assert!(display.is_ok());
+    assert!(display.bounds().is_ok());
   }
 }

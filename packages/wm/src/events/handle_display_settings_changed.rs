@@ -70,7 +70,7 @@ pub fn handle_display_settings_changed(
   // when a new monitor is connected again.
   for monitor in pending_monitors {
     if state.monitors().len() > 1 {
-      remove_monitor(monitor, state, config)?;
+      remove_monitor(&monitor, state, config)?;
     }
   }
 

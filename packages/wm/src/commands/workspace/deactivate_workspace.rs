@@ -8,14 +8,13 @@ use crate::{
 
 /// Deactivates a given workspace. This removes the container from its
 /// parent monitor and emits a `WorkspaceDeactivated` event.
-#[allow(clippy::needless_pass_by_value)]
 pub fn deactivate_workspace(
-  workspace: Workspace,
+  workspace: &Workspace,
   state: &WmState,
 ) -> anyhow::Result<()> {
   info!("Deactivating workspace: {workspace}");
 
-  detach_container(workspace.clone().into())?;
+  detach_container(&workspace.clone().into())?;
 
   state.emit_event(WmEvent::WorkspaceDeactivated {
     deactivated_id: workspace.id(),

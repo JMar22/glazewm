@@ -33,7 +33,7 @@ pub fn handle_window_focused(
   // the WM's focused container, then the focus is not synced.
   state.is_focus_synced = match focused_container.as_window_container() {
     Ok(window) => *window.native() == *native_window,
-    _ => native_window.is_desktop_window().unwrap_or(false),
+    _ => native_window.is_desktop_window(),
   };
 
   // Handle overriding focus on close/minimize. After a window is closed
@@ -150,7 +150,7 @@ fn should_restore_shell_focus(
       window.display_state(),
       DisplayState::Shown | DisplayState::Showing
     ) && window.native().is_visible().unwrap_or(false)
-      && !window.native().is_minimized().unwrap_or(true)
+      && !window.native().is_minimized()
   })
 }
 
@@ -170,9 +170,7 @@ fn schedule_shell_focus_restore(
     for delay_ms in SHELL_FOCUS_RESTORE_DELAYS_MS {
       tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
 
-      let Ok(current) = dispatcher.focused_window() else {
-        return;
-      };
+      let current = dispatcher.focused_window();
 
       if current == target {
         return;
@@ -189,7 +187,7 @@ fn schedule_shell_focus_restore(
       if !is_shell_focus_target(&current)
         || !target.is_valid()
         || !target.is_visible().unwrap_or(false)
-        || target.is_minimized().unwrap_or(true)
+        || target.is_minimized()
       {
         return;
       }

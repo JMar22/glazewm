@@ -8,12 +8,11 @@
 // as a type. This allows peeking to work nicer with generics.
 
 pub mod prelude {
-  pub use super::{Peekable, TPeek};
+  pub use super::TPeek;
 }
 
 /// Trait for any stream that can peek at the next token.
 pub trait PeekableStream {
-  fn is_empty(&self) -> bool;
   fn peek<T: syn::parse::Peek>(&self, token: T) -> bool;
 }
 
@@ -21,45 +20,29 @@ impl PeekableStream for &syn::parse::ParseStream<'_> {
   fn peek<T: syn::parse::Peek>(&self, token: T) -> bool {
     (*self).peek(token)
   }
-  fn is_empty(&self) -> bool {
-    (*self).is_empty()
-  }
 }
 
 impl PeekableStream for syn::parse::ParseStream<'_> {
   fn peek<T: syn::parse::Peek>(&self, token: T) -> bool {
     (*self).peek(token)
   }
-
-  fn is_empty(&self) -> bool {
-    (*self).is_empty()
-  }
 }
+
 impl PeekableStream for syn::parse::ParseBuffer<'_> {
   fn peek<T: syn::parse::Peek>(&self, token: T) -> bool {
     self.peek(token)
   }
-
-  fn is_empty(&self) -> bool {
-    self.is_empty()
-  }
 }
+
 impl PeekableStream for syn::parse::Lookahead1<'_> {
   fn peek<T: syn::parse::Peek>(&self, token: T) -> bool {
     self.peek(token)
   }
-
-  fn is_empty(&self) -> bool {
-    self.peek(syn::parse::End)
-  }
 }
+
 impl PeekableStream for &syn::parse::Lookahead1<'_> {
   fn peek<T: syn::parse::Peek>(&self, token: T) -> bool {
     (*self).peek(token)
-  }
-
-  fn is_empty(&self) -> bool {
-    (*self).peek(syn::parse::End)
   }
 }
 
@@ -81,22 +64,16 @@ pub trait Peekable {
   fn peek<T>(stream: T) -> bool
   where
     T: PeekableStream;
-  // Useful for debugging and custom error messages.
-  #[allow(dead_code)]
-  fn display() -> &'static str;
 }
 
 /// Trait for the types in syn that have a corresponding function that
-/// implements [syn::parse::Peek]. E.g. it implements a method for
-/// [syn::Ident] the type that returns [syn::Ident] the function.
+/// implements [`syn::parse::Peek`]. E.g. it implements a method for
+/// [`syn::Ident`] the type that returns [`syn::Ident`] the function.
 pub trait SynPeek {
   fn peekable() -> impl syn::parse::Peek;
-  // To be forwarded to [Peekable]
-  #[allow(dead_code)]
-  fn display() -> &'static str;
 }
 
-/// Implement [Peekable] for [SynPeek]
+/// Implement [`Peekable`] for [`SynPeek`]
 impl<T: SynPeek> Peekable for T {
   fn peek<S>(stream: S) -> bool
   where
@@ -104,21 +81,9 @@ impl<T: SynPeek> Peekable for T {
   {
     stream.peek(T::peekable())
   }
-
-  fn display() -> &'static str {
-    T::display()
-  }
 }
 
-/// Helper fucntion to get the display string for a peekable type.
-// Used in a macro call
-#[allow(dead_code)]
-pub fn get_peek_display<T: syn::parse::Peek>(_peek: T) -> &'static str {
-  use syn::token::Token;
-  T::Token::display()
-}
-
-/// Extends the [PeekableStream] trait with a method to peek at a type
+/// Extends the [`PeekableStream`] trait with a method to peek at a type
 /// rather than a value.
 ///
 /// # Example
@@ -148,7 +113,7 @@ where
 }
 
 /// Custom keyword macro to define a syn custom keyword that also
-/// implements Peekable.
+/// implements `Peekable`.
 macro_rules! custom_keyword {
   ($name:ident) => {
     syn::custom_keyword!($name);
@@ -157,26 +122,18 @@ macro_rules! custom_keyword {
       fn peekable() -> impl syn::parse::Peek {
         $name
       }
-
-      fn display() -> &'static str {
-        crate::common::peekable::get_peek_display(Self::peekable())
-      }
     }
   };
 }
 pub(crate) use custom_keyword;
 
-/// Macro for implementing [SynPeek] for a type that implements
-/// [syn::parse::Peek].
+/// Macro for implementing [`SynPeek`] for a type that implements
+/// [`syn::parse::Peek`].
 macro_rules! impl_syn_peek {
   ($($name:tt)+) => {
     impl SynPeek for $($name)+ {
       fn peekable() -> impl syn::parse::Peek {
         $($name)+
-      }
-
-      fn display() -> &'static str {
-        crate::common::peekable::get_peek_display(Self::peekable())
       }
     }
   };

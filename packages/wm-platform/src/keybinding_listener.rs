@@ -67,7 +67,13 @@ impl InterceptedKeypresses {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub struct Keybinding(Vec<Key>);
+pub struct Keybinding {
+  keys: Vec<Key>,
+
+  /// The final key in `keys`, kept separately so that a keybinding cannot
+  /// be without one.
+  trigger_key: Key,
+}
 
 impl Keybinding {
   /// Creates a new keybinding from a vector of keys.
@@ -76,26 +82,23 @@ impl Keybinding {
   ///
   /// Returns [`Error::InvalidKeybinding`] if the keybinding is empty.
   pub fn new(keys: Vec<Key>) -> crate::Result<Self> {
-    if keys.is_empty() {
+    let Some(&trigger_key) = keys.last() else {
       return Err(crate::Error::InvalidKeybinding);
-    }
+    };
 
-    Ok(Self(keys))
+    Ok(Self { keys, trigger_key })
   }
 
   /// Returns the keys in the keybinding.
   #[must_use]
   pub fn keys(&self) -> &[Key] {
-    &self.0
+    &self.keys
   }
 
   /// Returns the trigger key in the keybinding.
   #[must_use]
-  #[allow(clippy::missing_panics_doc)]
   pub fn trigger_key(&self) -> &Key {
-    // SAFETY: Keys vector is verified to be non-empty in
-    // `Keybinding::new`.
-    self.0.last().unwrap()
+    &self.trigger_key
   }
 }
 
@@ -121,6 +124,11 @@ pub struct KeybindingListener {
 
 impl KeybindingListener {
   /// Creates an instance of `KeybindingListener`.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if the keyboard hook can't be installed on the event
+  /// loop thread.
   pub fn new(
     keybindings: &[Keybinding],
     dispatcher: &Dispatcher,
@@ -170,6 +178,10 @@ impl KeybindingListener {
   }
 
   /// Terminates the keybinding listener.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if `UnhookWindowsHookEx` fails.
   pub fn terminate(&mut self) -> crate::Result<()> {
     self.keyboard_hook.terminate()
   }
@@ -216,7 +228,7 @@ impl KeybindingListener {
 
             *cached_key_states
               .entry(key)
-              .or_insert_with(|| event.is_key_down(key))
+              .or_insert_with(|| platform_impl::KeyEvent::is_key_down(key))
           })
         });
 
@@ -240,10 +252,9 @@ impl KeybindingListener {
           // the modifier is held. This avoids lookups for `Key::LShift`
           // and `Key::RShift`.
           .any(|(generic_key, _)| {
-            cached_key_states
-              .get(generic_key)
-              .copied()
-              .unwrap_or_else(|| event.is_key_down(*generic_key))
+            cached_key_states.get(generic_key).copied().unwrap_or_else(
+              || platform_impl::KeyEvent::is_key_down(*generic_key),
+            )
           });
 
         if has_extra_modifiers {

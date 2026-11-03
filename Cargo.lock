@@ -3230,6 +3230,7 @@ version = "0.0.0"
 dependencies = [
  "home",
  "libtest-mimic-collect",
+ "num-traits",
  "regex",
  "serde",
  "thiserror 2.0.12",

@@ -41,7 +41,7 @@ pub fn handle_mouse_move(
       {
         state
           .dispatcher
-          .window_from_point(position)?
+          .window_from_point(position)
           .and_then(|native| state.window_from_native(&native))
       }
     };

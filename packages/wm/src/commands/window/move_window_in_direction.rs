@@ -1,6 +1,6 @@
 use anyhow::Context;
 use wm_common::{TilingDirection, WindowState};
-use wm_platform::{Direction, Rect};
+use wm_platform::{int_to_f32, Direction, Rect};
 
 use crate::{
   commands::container::{
@@ -60,7 +60,7 @@ fn move_tiling_window(
     .and_then(|parent| parent.as_split().cloned())
   {
     if split_parent.child_count() == 1 {
-      flatten_split_container(split_parent)?;
+      flatten_split_container(&split_parent)?;
     }
   }
 
@@ -455,13 +455,13 @@ fn new_floating_position(
 
   // Calculate the distance the window should move based on the ratio of
   // the window's length to the monitor's length.
-  #[allow(clippy::cast_precision_loss)]
-  let move_distance = match window_length as f32 / monitor_length as f32 {
-    x if (0.0..0.2).contains(&x) => length_delta / 5,
-    x if (0.2..0.4).contains(&x) => length_delta / 4,
-    x if (0.4..0.6).contains(&x) => length_delta / 3,
-    _ => length_delta / 2,
-  };
+  let move_distance =
+    match int_to_f32(window_length) / int_to_f32(monitor_length) {
+      x if (0.0..0.2).contains(&x) => length_delta / 5,
+      x if (0.2..0.4).contains(&x) => length_delta / 4,
+      x if (0.4..0.6).contains(&x) => length_delta / 3,
+      _ => length_delta / 2,
+    };
 
   // Snap the window to the current monitor's edge if it's within 15px of
   // it after the move.

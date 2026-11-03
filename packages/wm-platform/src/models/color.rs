@@ -11,12 +11,12 @@ pub struct Color {
 }
 
 impl Color {
+  /// Packs the color as `0x00BBGGRR`, the layout of a Win32 `COLORREF`.
   #[must_use]
-  #[allow(clippy::missing_panics_doc)]
   pub fn to_bgr(&self) -> u32 {
-    let bgr = format!("{:02x}{:02x}{:02x}", self.b, self.g, self.r);
-    // SAFETY: An invalid hex value is unrepresentable.
-    u32::from_str_radix(&bgr, 16).unwrap()
+    (u32::from(self.b) << 16)
+      | (u32::from(self.g) << 8)
+      | u32::from(self.r)
   }
 }
 

@@ -1,7 +1,5 @@
 use anyhow::Context;
-use wm_common::{
-  try_warn, FullscreenStateConfig, TilingDirection, WindowState,
-};
+use wm_common::{FullscreenStateConfig, TilingDirection, WindowState};
 use wm_platform::{LengthValue, Point, Rect};
 
 use crate::{
@@ -18,7 +16,7 @@ use crate::{
     CommonGetters, PositionGetters, TilingDirectionGetters, WindowGetters,
   },
   user_config::UserConfig,
-  wm_state::WmState,
+  wm_state::{containers_at_point, WmState},
 };
 
 /// Handles the event for when a window is finished being moved or resized
@@ -40,7 +38,7 @@ pub fn handle_window_moved_or_resized_end(
 
   match &window {
     WindowContainer::NonTilingWindow(window) => {
-      let is_maximized = try_warn!(window.native().is_maximized());
+      let is_maximized = window.native().is_maximized();
 
       window.update_native_properties(|properties| {
         properties.is_maximized = is_maximized;
@@ -146,9 +144,63 @@ pub fn handle_window_moved_or_resized_end(
   Ok(())
 }
 
+/// Gets the deepest direction container under the cursor, which the
+/// dropped window is to be placed in.
+fn drop_target_parent(
+  moved_window: &NonTilingWindow,
+  mouse_pos: &Point,
+  state: &WmState,
+) -> anyhow::Result<DirectionContainer> {
+  let mouse_workspace = state
+    .monitor_at_point(mouse_pos)
+    .and_then(|monitor| monitor.displayed_workspace())
+    .or_else(|| moved_window.workspace())
+    .context("Couldn't find workspace for window drop.")?;
+
+  // Get the workspace, split containers, and other windows under the
+  // dragged window.
+  let containers_at_pos =
+    containers_at_point(&mouse_workspace.clone().into(), mouse_pos)
+      .into_iter()
+      .filter(|container| container.id() != moved_window.id());
+
+  // Get the deepest direction container under the dragged window.
+  Ok(
+    containers_at_pos
+      .filter_map(|container| container.as_direction_container().ok())
+      .fold(mouse_workspace.into(), |acc, container| {
+        if container.ancestors().count() > acc.ancestors().count() {
+          container
+        } else {
+          acc
+        }
+      }),
+  )
+}
+
+/// Gets the tiling child of `target_parent` nearest to the cursor.
+fn nearest_tiling_child(
+  target_parent: &DirectionContainer,
+  mouse_pos: &Point,
+) -> anyhow::Result<TilingContainer> {
+  target_parent
+    .children()
+    .into_iter()
+    .filter_map(|container| container.as_tiling_container().ok())
+    .try_fold(None, |acc: Option<TilingContainer>, container| match acc {
+      Some(acc) => {
+        let is_nearer = acc.to_rect()?.distance_to_point(mouse_pos)
+          < container.to_rect()?.distance_to_point(mouse_pos);
+
+        anyhow::Ok(Some(if is_nearer { acc } else { container }))
+      }
+      None => Ok(Some(container)),
+    })?
+    .context("No nearest container.")
+}
+
 /// Handles transition from temporary floating window to tiling window on
 /// drag end.
-#[allow(clippy::too_many_lines)]
 fn drop_as_tiling_window(
   moved_window: &NonTilingWindow,
   state: &mut WmState,
@@ -160,29 +212,7 @@ fn drop_as_tiling_window(
   );
 
   let mouse_pos = state.dispatcher.cursor_position()?;
-  let mouse_workspace = state
-    .monitor_at_point(&mouse_pos)
-    .and_then(|monitor| monitor.displayed_workspace())
-    .or_else(|| moved_window.workspace())
-    .context("Couldn't find workspace for window drop.")?;
-
-  // Get the workspace, split containers, and other windows under the
-  // dragged window.
-  let containers_at_pos = state
-    .containers_at_point(&mouse_workspace.clone().into(), &mouse_pos)
-    .into_iter()
-    .filter(|container| container.id() != moved_window.id());
-
-  // Get the deepest direction container under the dragged window.
-  let target_parent: DirectionContainer = containers_at_pos
-    .filter_map(|container| container.as_direction_container().ok())
-    .fold(mouse_workspace.into(), |acc, container| {
-      if container.ancestors().count() > acc.ancestors().count() {
-        container
-      } else {
-        acc
-      }
-    });
+  let target_parent = drop_target_parent(moved_window, &mouse_pos, state)?;
 
   // If the target parent has no children (i.e. an empty workspace), then
   // add the window directly.
@@ -204,20 +234,8 @@ fn drop_as_tiling_window(
     );
   }
 
-  let nearest_container = target_parent
-    .children()
-    .into_iter()
-    .filter_map(|container| container.as_tiling_container().ok())
-    .try_fold(None, |acc: Option<TilingContainer>, container| match acc {
-      Some(acc) => {
-        let is_nearer = acc.to_rect()?.distance_to_point(&mouse_pos)
-          < container.to_rect()?.distance_to_point(&mouse_pos);
-
-        anyhow::Ok(Some(if is_nearer { acc } else { container }))
-      }
-      None => Ok(Some(container)),
-    })?
-    .context("No nearest container.")?;
+  let nearest_container =
+    nearest_tiling_child(&target_parent, &mouse_pos)?;
 
   let tiling_direction = target_parent.tiling_direction();
   let drop_position =

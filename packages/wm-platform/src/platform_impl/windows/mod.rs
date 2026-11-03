@@ -16,3 +16,9 @@ pub(crate) use mouse_listener::*;
 pub(crate) use native_window::*;
 pub(crate) use single_instance::*;
 pub(crate) use window_listener::*;
+
+/// Size of `T` as the `u32` byte count that Win32 size fields and
+/// parameters take.
+pub(crate) fn size_of_u32<T>() -> crate::Result<u32> {
+  Ok(u32::try_from(std::mem::size_of::<T>())?)
+}

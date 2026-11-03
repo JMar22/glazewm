@@ -2,8 +2,8 @@ use anyhow::Context;
 #[cfg(target_os = "windows")]
 use wm_common::WindowEffectConfig;
 use wm_common::{
-  CursorJumpTrigger, DisplayState, HideCorner, HideMethod, UniqueExt,
-  WindowState, WmEvent,
+  CursorJumpTrigger, DisplayState, HideCorner, HideMethod, TaskbarWindows,
+  UniqueExt, WindowState, WmEvent,
 };
 #[cfg(target_os = "windows")]
 use wm_platform::NativeWindowWindowsExt;
@@ -12,7 +12,7 @@ use wm_platform::{CornerStyle, Dispatcher, NativeWindow, OpacityValue};
 use wm_platform::{Rect, WindowZOrder};
 
 use crate::{
-  models::{Container, WindowContainer},
+  models::{Container, WindowContainer, Workspace},
   traits::{CommonGetters, PositionGetters, WindowGetters},
   user_config::UserConfig,
   wm_state::WmState,
@@ -86,7 +86,7 @@ fn sync_focus(
   let native_window = focused_container.as_window_container().ok();
 
   #[cfg(target_os = "windows")]
-  let previous_foreground = state.dispatcher.focused_window().ok();
+  let previous_foreground = state.dispatcher.focused_window();
 
   // Sets focus to the appropriate target:
   // - If the container is a window, focuses that window.
@@ -115,9 +115,7 @@ fn sync_focus(
   // stealing focus back.
   #[cfg(target_os = "windows")]
   if config.value.general.restore_focus_on_shell {
-    if let (Some(window), Some(previous_foreground)) =
-      (native_window, previous_foreground)
-    {
+    if let Some(window) = native_window {
       schedule_focus_convergence(
         window.native().clone(),
         previous_foreground,
@@ -148,9 +146,7 @@ fn schedule_focus_convergence(
     for delay_ms in FOCUS_CONVERGENCE_DELAYS_MS {
       tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
 
-      let Ok(current) = dispatcher.focused_window() else {
-        return;
-      };
+      let current = dispatcher.focused_window();
 
       if current == target {
         return;
@@ -159,7 +155,7 @@ fn schedule_focus_convergence(
       if current != previous_foreground
         || !target.is_valid()
         || !target.is_visible().unwrap_or(false)
-        || target.is_minimized().unwrap_or(true)
+        || target.is_minimized()
       {
         return;
       }
@@ -233,7 +229,43 @@ fn windows_to_bring_to_front(
   Ok(windows_to_bring_to_front)
 }
 
-#[allow(clippy::too_many_lines)]
+/// Gets the z-order a window is redrawn at.
+///
+/// Windows set to be shown on top stay above all others. A window brought
+/// to the front goes directly after its workspace's focused window, or to
+/// the normal band if it is the focused window.
+fn window_z_order(
+  window: &WindowContainer,
+  workspace: &Workspace,
+  should_bring_to_front: bool,
+) -> WindowZOrder {
+  match window.state() {
+    WindowState::Floating(config) if config.shown_on_top => {
+      WindowZOrder::TopMost
+    }
+    WindowState::Fullscreen(config) if config.shown_on_top => {
+      WindowZOrder::TopMost
+    }
+    _ if should_bring_to_front => {
+      let focused_descendant = workspace
+        .descendant_focus_order()
+        .next()
+        .and_then(|container| container.as_window_container().ok());
+
+      if let Some(focused_descendant) = focused_descendant {
+        if window.id() == focused_descendant.id() {
+          WindowZOrder::Normal
+        } else {
+          WindowZOrder::AfterWindow(focused_descendant.native().id())
+        }
+      } else {
+        WindowZOrder::Normal
+      }
+    }
+    _ => WindowZOrder::Normal,
+  }
+}
+
 fn redraw_containers(
   focused_container: &Container,
   state: &mut WmState,
@@ -291,32 +323,8 @@ fn redraw_containers(
       .map(|(_, hide_corner)| hide_corner)
       .context("Monitor not found in hide corner map.")?;
 
-    // Whether the window should be shown above all other windows.
-    let z_order = match window.state() {
-      WindowState::Floating(config) if config.shown_on_top => {
-        WindowZOrder::TopMost
-      }
-      WindowState::Fullscreen(config) if config.shown_on_top => {
-        WindowZOrder::TopMost
-      }
-      _ if should_bring_to_front => {
-        let focused_descendant = workspace
-          .descendant_focus_order()
-          .next()
-          .and_then(|container| container.as_window_container().ok());
-
-        if let Some(focused_descendant) = focused_descendant {
-          if window.id() == focused_descendant.id() {
-            WindowZOrder::Normal
-          } else {
-            WindowZOrder::AfterWindow(focused_descendant.native().id())
-          }
-        } else {
-          WindowZOrder::Normal
-        }
-      }
-      _ => WindowZOrder::Normal,
-    };
+    let z_order =
+      window_z_order(window, &workspace, should_bring_to_front);
 
     // Set the z-order of the window.
     #[cfg(target_os = "windows")]
@@ -372,7 +380,7 @@ fn redraw_containers(
     #[cfg(target_os = "windows")]
     if should_sync_taskbar_visibility(
       &config.value.general.hide_method,
-      config.value.general.show_all_in_taskbar,
+      config.value.general.taskbar_windows,
       &window.display_state(),
       is_visible,
     ) {
@@ -517,12 +525,12 @@ pub(crate) fn sync_fullscreen_mark(
 #[cfg(any(test, target_os = "windows"))]
 fn should_sync_taskbar_visibility(
   hide_method: &HideMethod,
-  show_all_in_taskbar: bool,
+  taskbar_windows: TaskbarWindows,
   display_state: &DisplayState,
   is_visible: bool,
 ) -> bool {
   *hide_method == HideMethod::Cloak
-    && !show_all_in_taskbar
+    && taskbar_windows == TaskbarWindows::ShownWorkspaces
     && (!is_visible || *display_state == DisplayState::Showing)
 }
 
@@ -593,15 +601,15 @@ fn reposition_window(
           // Need to restore window if transitioning from maximized
           // fullscreen to non-maximized fullscreen.
           WindowState::Fullscreen(fullscreen) => {
-            !fullscreen.maximized && window.native().is_maximized()?
+            !fullscreen.maximized && window.native().is_maximized()
           }
           // No need to restore window if it'll be minimized. Transitioning
           // from maximized to minimized works without having to
           // restore.
           WindowState::Minimized => false,
           _ => {
-            window.native().is_minimized()?
-              || window.native().is_maximized()?
+            window.native().is_minimized()
+              || window.native().is_maximized()
           }
         };
 
@@ -623,7 +631,7 @@ fn reposition_window(
 
       match &window.state() {
         WindowState::Minimized => {
-          if !window.native().is_minimized()? {
+          if !window.native().is_minimized() {
             window.native().minimize()?;
           }
         }
@@ -633,7 +641,7 @@ fn reposition_window(
         {
           // Maximizing a window that is drawing over the whole monitor on
           // its own terms would take it back out of that.
-          if !keeps_own_frame && !window.native().is_maximized()? {
+          if !keeps_own_frame && !window.native().is_maximized() {
             window.native().maximize()?;
           }
 
@@ -815,7 +823,7 @@ fn apply_transparency_effect(
 
 #[cfg(test)]
 mod tests {
-  use wm_common::{DisplayState, HideMethod};
+  use wm_common::{DisplayState, HideMethod, TaskbarWindows};
   use wm_platform::Rect;
 
   use super::{
@@ -1012,13 +1020,13 @@ mod tests {
   fn syncs_hidden_cloaked_windows_on_every_redraw() {
     assert!(should_sync_taskbar_visibility(
       &HideMethod::Cloak,
-      false,
+      TaskbarWindows::ShownWorkspaces,
       &DisplayState::Hidden,
       false,
     ));
     assert!(should_sync_taskbar_visibility(
       &HideMethod::Cloak,
-      false,
+      TaskbarWindows::ShownWorkspaces,
       &DisplayState::Hiding,
       false,
     ));
@@ -1028,13 +1036,13 @@ mod tests {
   fn adds_visible_taskbar_tabs_only_while_showing() {
     assert!(should_sync_taskbar_visibility(
       &HideMethod::Cloak,
-      false,
+      TaskbarWindows::ShownWorkspaces,
       &DisplayState::Showing,
       true,
     ));
     assert!(!should_sync_taskbar_visibility(
       &HideMethod::Cloak,
-      false,
+      TaskbarWindows::ShownWorkspaces,
       &DisplayState::Shown,
       true,
     ));
@@ -1044,13 +1052,13 @@ mod tests {
   fn respects_taskbar_and_hide_method_configuration() {
     assert!(!should_sync_taskbar_visibility(
       &HideMethod::Cloak,
-      true,
+      TaskbarWindows::All,
       &DisplayState::Hidden,
       false,
     ));
     assert!(!should_sync_taskbar_visibility(
       &HideMethod::Hide,
-      false,
+      TaskbarWindows::ShownWorkspaces,
       &DisplayState::Hidden,
       false,
     ));

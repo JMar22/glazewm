@@ -22,7 +22,7 @@ use windows::Win32::{
   },
 };
 
-use super::FOREGROUND_INPUT_IDENTIFIER;
+use super::{size_of_u32, FOREGROUND_INPUT_IDENTIFIER};
 use crate::{
   mouse_listener::MouseEventKind,
   platform_event::{MouseButton, MouseEvent, PressedButtons},
@@ -165,24 +165,22 @@ impl MouseListener {
     callback_data: &mut CallbackData,
   ) -> crate::Result<()> {
     let mut raw_input: RAWINPUT = unsafe { std::mem::zeroed() };
-    #[allow(clippy::cast_possible_truncation)]
-    let mut raw_input_size = std::mem::size_of::<RAWINPUT>() as u32;
+    let mut raw_input_size = size_of_u32::<RAWINPUT>()?;
+    let header_size = size_of_u32::<RAWINPUTHEADER>()?;
 
     let res_size = unsafe {
-      #[allow(clippy::cast_possible_truncation)]
       GetRawInputData(
         HRAWINPUT(lparam),
         RID_INPUT,
         Some(std::ptr::from_mut(&mut raw_input).cast()),
         &raw mut raw_input_size,
-        std::mem::size_of::<RAWINPUTHEADER>() as u32,
+        header_size,
       )
     };
 
     // Ignore if input is invalid or not a mouse event. Inputs from our own
     // process are also ignored, since `NativeWindow::focus` simulates
     // mouse input.
-    #[allow(clippy::cast_possible_truncation)]
     if res_size == 0
       || raw_input_size == u32::MAX
       || raw_input.header.dwType != RIM_TYPEMOUSE.0
@@ -306,11 +304,7 @@ impl MouseListener {
     };
 
     unsafe {
-      #[allow(clippy::cast_possible_truncation)]
-      RegisterRawInputDevices(
-        &[rid],
-        std::mem::size_of::<RAWINPUTDEVICE>() as u32,
-      )
+      RegisterRawInputDevices(&[rid], size_of_u32::<RAWINPUTDEVICE>()?)
     }
     .map_err(crate::Error::from)
   }

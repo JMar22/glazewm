@@ -69,7 +69,6 @@ impl Default for GapsConfig {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default, rename_all(serialize = "camelCase"))]
-#[allow(clippy::struct_excessive_bools)]
 pub struct GeneralConfig {
   /// Config for automatically moving the cursor.
   pub cursor_jump: CursorJumpConfig,
@@ -99,7 +98,11 @@ pub struct GeneralConfig {
   pub hide_method: HideMethod,
 
   /// Affects which windows get shown in the native Windows taskbar.
-  pub show_all_in_taskbar: bool,
+  #[serde(rename(
+    serialize = "showAllInTaskbar",
+    deserialize = "show_all_in_taskbar"
+  ))]
+  pub taskbar_windows: TaskbarWindows,
 }
 
 impl Default for GeneralConfig {
@@ -113,8 +116,41 @@ impl Default for GeneralConfig {
       shutdown_commands: vec![],
       config_reload_commands: vec![],
       hide_method: HideMethod::Cloak,
-      show_all_in_taskbar: false,
+      taskbar_windows: TaskbarWindows::ShownWorkspaces,
     }
+  }
+}
+
+/// Which windows get shown in the native Windows taskbar. Has no effect
+/// with `hide_method: 'hide'`.
+///
+/// Configured as the boolean `show_all_in_taskbar`.
+#[derive(
+  Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize,
+)]
+#[serde(from = "bool", into = "bool")]
+pub enum TaskbarWindows {
+  /// Only windows from the currently shown workspaces (`false`).
+  #[default]
+  ShownWorkspaces,
+
+  /// All windows, regardless of workspace (`true`).
+  All,
+}
+
+impl From<bool> for TaskbarWindows {
+  fn from(show_all: bool) -> Self {
+    if show_all {
+      Self::All
+    } else {
+      Self::ShownWorkspaces
+    }
+  }
+}
+
+impl From<TaskbarWindows> for bool {
+  fn from(taskbar_windows: TaskbarWindows) -> Self {
+    taskbar_windows == TaskbarWindows::All
   }
 }
 

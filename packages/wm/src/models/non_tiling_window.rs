@@ -17,7 +17,7 @@ use crate::{
   models::{
     Container, DirectionContainer, InsertionTarget,
     NativeWindowProperties, TilingContainer, TilingWindow,
-    WindowContainer,
+    WindowContainer, WindowInit,
   },
   traits::{CommonGetters, PositionGetters, WindowGetters},
 };
@@ -45,37 +45,28 @@ struct NonTilingWindowInner {
 }
 
 impl NonTilingWindow {
-  #[allow(clippy::too_many_arguments)]
   pub fn new(
-    id: Option<Uuid>,
-    native: NativeWindow,
-    properties: NativeWindowProperties,
+    init: WindowInit,
     state: WindowState,
-    prev_state: Option<WindowState>,
-    border_delta: RectDelta,
     insertion_target: Option<InsertionTarget>,
-    floating_placement: Rect,
-    has_custom_floating_placement: bool,
-    done_window_rules: Vec<WindowRuleConfig>,
-    active_drag: Option<ActiveDrag>,
   ) -> Self {
     let window = NonTilingWindowInner {
-      id: id.unwrap_or_else(Uuid::new_v4),
+      id: init.id.unwrap_or_else(Uuid::new_v4),
       parent: None,
       children: VecDeque::new(),
       child_focus_order: VecDeque::new(),
-      native,
-      native_properties: properties,
+      native: init.native,
+      native_properties: init.properties,
       state,
-      prev_state,
+      prev_state: init.prev_state,
       insertion_target,
       display_state: DisplayState::Shown,
-      border_delta,
+      border_delta: init.border_delta,
       has_pending_dpi_adjustment: false,
-      floating_placement,
-      has_custom_floating_placement,
-      done_window_rules,
-      active_drag,
+      floating_placement: init.floating_placement,
+      has_custom_floating_placement: init.has_custom_floating_placement,
+      done_window_rules: init.done_window_rules,
+      active_drag: init.active_drag,
     };
 
     Self(Rc::new(RefCell::new(window)))
@@ -100,16 +91,19 @@ impl NonTilingWindow {
     };
 
     TilingWindow::new(
-      Some(self.id()),
-      self.native().clone(),
-      self.native_properties().clone(),
-      prev_state,
-      self.border_delta(),
-      self.floating_placement(),
-      self.has_custom_floating_placement(),
+      WindowInit {
+        id: Some(self.id()),
+        native: self.native().clone(),
+        properties: self.native_properties().clone(),
+        prev_state,
+        border_delta: self.border_delta(),
+        floating_placement: self.floating_placement(),
+        has_custom_floating_placement: self
+          .has_custom_floating_placement(),
+        done_window_rules: self.done_window_rules(),
+        active_drag: self.active_drag(),
+      },
       gaps_config,
-      self.done_window_rules(),
-      self.active_drag(),
     )
   }
 
@@ -130,8 +124,7 @@ impl NonTilingWindow {
       display_state: self.display_state(),
       border_delta: self.border_delta(),
       floating_placement: self.floating_placement(),
-      #[allow(clippy::cast_possible_wrap, clippy::unnecessary_cast)]
-      handle: self.native().id().0 as isize,
+      handle: self.native().id().0,
       title: self.native_properties().title,
       #[cfg(target_os = "windows")]
       class_name: self.native_properties().class_name,

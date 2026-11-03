@@ -130,6 +130,11 @@ impl<T> ThreadBound<T> {
   /// Execute a closure with `&T` on the event loop thread.
   ///
   /// Runs synchronously and returns the closure's result.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if the closure can't be run on the event loop thread
+  /// (see [`Dispatcher::dispatch_sync`]).
   #[inline]
   pub fn with<F, R>(&self, f: F) -> crate::Result<R>
   where
@@ -142,12 +147,12 @@ impl<T> ThreadBound<T> {
   /// Execute a closure with `&mut T` on the event loop thread.
   ///
   /// Runs synchronously and returns the closure's result.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if the closure can't be run on the event loop thread
+  /// (see [`Dispatcher::dispatch_sync`]).
   #[inline]
-  #[allow(
-    clippy::borrow_as_ptr,
-    clippy::ptr_as_ptr,
-    clippy::as_conversions
-  )]
   pub fn with_mut<F, R>(&mut self, f: F) -> crate::Result<R>
   where
     F: Send + FnOnce(&mut T) -> R,
@@ -179,12 +184,6 @@ impl<T> fmt::Debug for ThreadBound<T> {
 }
 
 impl<T> Drop for ThreadBound<T> {
-  #[allow(
-    clippy::borrow_as_ptr,
-    clippy::ptr_as_ptr,
-    clippy::as_conversions,
-    clippy::ref_as_ptr
-  )]
   fn drop(&mut self) {
     if mem::needs_drop::<T>() {
       // TODO: This is pretty cursed. Should be a better way.

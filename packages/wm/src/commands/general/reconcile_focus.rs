@@ -40,19 +40,13 @@ const STRANDED_FOCUS_MAX_ATTEMPTS: u32 = 3;
 /// Restores focus to the WM's focused window when the OS has left keyboard
 /// focus stranded on the shell.
 ///
-/// A failed restore is logged rather than propagated, but the fallible
-/// signature is kept so this matches the other arms of the main event
-/// loop.
+/// A failed restore is logged rather than propagated.
 #[cfg(target_os = "windows")]
-#[allow(clippy::unnecessary_wraps)]
-pub fn reconcile_stranded_focus(
-  state: &mut WmState,
-  config: &UserConfig,
-) -> anyhow::Result<()> {
+pub fn reconcile_stranded_focus(state: &mut WmState, config: &UserConfig) {
   if state.is_paused || !config.value.general.restore_focus_on_shell {
     state.stranded_focus_ticks = 0;
     state.stranded_focus_attempts = 0;
-    return Ok(());
+    return;
   }
 
   // Nobody is there to hand focus back to, and restoring it would only
@@ -60,7 +54,7 @@ pub fn reconcile_stranded_focus(
   if is_user_away(&state.dispatcher) {
     state.stranded_focus_ticks = 0;
     state.stranded_focus_attempts = 0;
-    return Ok(());
+    return;
   }
 
   // An open menu holds the foreground on the window that owns it, and that
@@ -77,7 +71,7 @@ pub fn reconcile_stranded_focus(
   if state.dispatcher.is_menu_open().unwrap_or(false) {
     state.stranded_focus_ticks = 0;
     state.stranded_focus_attempts = 0;
-    return Ok(());
+    return;
   }
 
   // Only restore to a window the user can actually see. A hidden or
@@ -93,22 +87,21 @@ pub fn reconcile_stranded_focus(
     })
     .map(|window| window.native().clone())
     .filter(|native| {
-      native.is_visible().unwrap_or(false)
-        && !native.is_minimized().unwrap_or(true)
+      native.is_visible().unwrap_or(false) && !native.is_minimized()
     });
 
-  let (Some(target), Ok(current)) =
-    (target, state.dispatcher.focused_window())
-  else {
+  let Some(target) = target else {
     state.stranded_focus_ticks = 0;
     state.stranded_focus_attempts = 0;
-    return Ok(());
+    return;
   };
+
+  let current = state.dispatcher.focused_window();
 
   if current == target || !is_stranded_focus_target(&current) {
     state.stranded_focus_ticks = 0;
     state.stranded_focus_attempts = 0;
-    return Ok(());
+    return;
   }
 
   // Checked only once focus already looks stranded, which is rare, so the
@@ -116,12 +109,12 @@ pub fn reconcile_stranded_focus(
   if shell_popup_is_open(&state.dispatcher) {
     state.stranded_focus_ticks = 0;
     state.stranded_focus_attempts = 0;
-    return Ok(());
+    return;
   }
 
   state.stranded_focus_ticks += 1;
   if state.stranded_focus_ticks < STRANDED_FOCUS_TICKS_BEFORE_RESTORE {
-    return Ok(());
+    return;
   }
 
   state.stranded_focus_ticks = 0;
@@ -130,7 +123,7 @@ pub fn reconcile_stranded_focus(
   // refusing. The counter is cleared as soon as focus lands anywhere
   // real, so a later stranding gets a fresh set of attempts.
   if state.stranded_focus_attempts >= STRANDED_FOCUS_MAX_ATTEMPTS {
-    return Ok(());
+    return;
   }
 
   state.stranded_focus_attempts += 1;
@@ -148,8 +141,6 @@ pub fn reconcile_stranded_focus(
       }
     }
   }
-
-  Ok(())
 }
 
 /// Whether the user has left, so there is nobody to hand focus back to.
@@ -267,7 +258,7 @@ fn popup_is_menu_sized(popup: &NativeWindow) -> bool {
 #[cfg(target_os = "windows")]
 pub(crate) fn is_shell_focus_target(native_window: &NativeWindow) -> bool {
   native_window.hwnd().0 == 0
-    || native_window.is_desktop_window().unwrap_or(false)
+    || native_window.is_desktop_window()
     || native_window
       .class_name()
       .is_ok_and(|class_name| is_taskbar_window_class(&class_name))

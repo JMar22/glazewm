@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{Direction, LengthValue, Point, RectDelta};
+use crate::{int_to_f32, Direction, LengthValue, Point, RectDelta};
 
 #[derive(Debug, Deserialize, Clone, Serialize, Eq, PartialEq)]
 pub enum Corner {
@@ -248,8 +248,7 @@ impl Rect {
       .abs()
       .max((self.y() + self.height() - point.y).abs());
 
-    #[allow(clippy::cast_precision_loss)]
-    ((dx * dx + dy * dy) as f32).sqrt()
+    int_to_f32(dx * dx + dy * dy).sqrt()
   }
 
   /// Returns the union of this rect and another rect.

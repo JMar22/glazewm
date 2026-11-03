@@ -37,7 +37,6 @@ pub enum KeyParseError {
 }
 
 /// Cross-platform key representation.
-#[allow(clippy::unsafe_derive_deserialize)]
 #[derive(
   Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize,
 )]
@@ -209,18 +208,13 @@ impl Key {
   pub fn try_from_literal(key_str: &str) -> Result<Self, KeyParseError> {
     #[cfg(target_os = "windows")]
     {
-      use windows::Win32::UI::Input::KeyboardAndMouse::{
-        GetKeyboardLayout, VkKeyScanExW,
-      };
-
       // Check if the key exists on the current keyboard layout.
       let utf16_key = key_str
         .encode_utf16()
         .next()
         .ok_or_else(|| KeyParseError::UnknownKey(key_str.to_string()))?;
 
-      let layout = unsafe { GetKeyboardLayout(0) };
-      let vk_code = unsafe { VkKeyScanExW(utf16_key, layout) };
+      let vk_code = crate::platform_impl::scan_key_for_char(utf16_key);
 
       if vk_code == -1 {
         return Err(KeyParseError::UnknownKey(key_str.to_string()));

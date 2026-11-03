@@ -29,7 +29,7 @@ pub fn handle_window_hidden(
     if config.value.general.hide_method == HideMethod::Cloak
       && !window.native().has_visible_style()
     {
-      unmanage_window(window, state)?;
+      unmanage_window(&window, state)?;
       return Ok(());
     }
 
@@ -48,7 +48,7 @@ pub fn handle_window_hidden(
       || window.display_state() == DisplayState::Shown)
       && !window.native().is_visible().unwrap_or(false)
     {
-      unmanage_window(window, state)?;
+      unmanage_window(&window, state)?;
     }
   }
 

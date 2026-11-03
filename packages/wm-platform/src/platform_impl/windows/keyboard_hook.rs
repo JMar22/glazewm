@@ -4,8 +4,8 @@ use windows::Win32::{
   Foundation::{HINSTANCE, LPARAM, LRESULT, WPARAM},
   UI::{
     Input::KeyboardAndMouse::{
-      GetKeyState, VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_RCONTROL,
-      VK_RMENU, VK_RSHIFT, VK_RWIN,
+      GetKeyState, GetKeyboardLayout, VkKeyScanExW, VK_LCONTROL, VK_LMENU,
+      VK_LSHIFT, VK_LWIN, VK_RCONTROL, VK_RMENU, VK_RSHIFT, VK_RWIN,
     },
     WindowsAndMessaging::{
       CallNextHookEx, SetWindowsHookExW, UnhookWindowsHookEx, HHOOK,
@@ -33,18 +33,16 @@ pub struct KeyEvent {
   /// The key that was pressed or released.
   pub key: Key,
 
-  /// Key code that generated this event.
-  #[allow(dead_code)]
-  pub key_code: KeyCode,
-
   /// Whether the event is for a key press or release.
   pub is_keypress: bool,
 }
 
 impl KeyEvent {
   /// Gets whether the specified key is currently pressed.
-  #[allow(clippy::unused_self)]
-  pub fn is_key_down(&self, key: Key) -> bool {
+  ///
+  /// Reads the key state as of the keyboard event being processed, so
+  /// call it from within the hook callback.
+  pub fn is_key_down(key: Key) -> bool {
     match key {
       Key::Cmd | Key::Win => {
         Self::is_key_down_raw(VK_LWIN.0)
@@ -77,6 +75,17 @@ impl KeyEvent {
   fn is_key_down_raw(key: u16) -> bool {
     unsafe { (GetKeyState(key.into()) & 0x80) == 0x80 }
   }
+}
+
+/// Looks up the key that types `utf16_key` on the current keyboard
+/// layout, with `VkKeyScanExW`.
+///
+/// The low-order byte of the result is the virtual-key code and the
+/// high-order byte the shift state it needs, or the result is `-1` if no
+/// key types the character.
+pub(crate) fn scan_key_for_char(utf16_key: u16) -> i16 {
+  let layout = unsafe { GetKeyboardLayout(0) };
+  unsafe { VkKeyScanExW(utf16_key, layout) }
 }
 
 /// A system-wide low-level keyboard hook.
@@ -161,21 +170,19 @@ impl KeyboardHook {
     // Get struct with the keyboard input event.
     let input = unsafe { *(lparam.0 as *const KBDLLHOOKSTRUCT) };
 
-    #[allow(clippy::cast_possible_truncation)]
-    let key_code = KeyCode(input.vkCode as u16);
-    #[allow(clippy::cast_possible_truncation)]
     let is_keypress =
-      wparam.0 as u32 == WM_KEYDOWN || wparam.0 as u32 == WM_SYSKEYDOWN;
+      matches!(u32::try_from(wparam.0), Ok(WM_KEYDOWN | WM_SYSKEYDOWN));
 
-    let Ok(key) = Key::try_from(key_code) else {
+    // Virtual-key codes range from 1 to 254, so any key code that does not
+    // fit is not a key to act on.
+    let Some(key) = u16::try_from(input.vkCode)
+      .ok()
+      .and_then(|vk_code| Key::try_from(KeyCode(vk_code)).ok())
+    else {
       return unsafe { CallNextHookEx(None, code, wparam, lparam) };
     };
 
-    let key_event = KeyEvent {
-      key,
-      key_code,
-      is_keypress,
-    };
+    let key_event = KeyEvent { key, is_keypress };
 
     let should_intercept = HOOK.with(|state| {
       if let Some(callback) = state.take() {

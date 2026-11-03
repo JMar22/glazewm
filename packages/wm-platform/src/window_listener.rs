@@ -12,6 +12,12 @@ pub struct WindowListener {
 
 impl WindowListener {
   /// Creates a new window listener.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if the window event hooks can't be installed on the
+  /// event loop thread, or if a window listener already exists on that
+  /// thread ([`Error::Platform`](crate::Error::Platform)).
   pub fn new(dispatcher: &Dispatcher) -> crate::Result<Self> {
     let (event_tx, event_rx) = mpsc::unbounded_channel();
     let inner = platform_impl::WindowListener::new(event_tx, dispatcher)?;

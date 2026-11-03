@@ -3,6 +3,8 @@ use std::str::FromStr;
 use regex::Regex;
 use serde::{Deserialize, Deserializer, Serialize};
 
+use crate::{f32_to_int, int_to_f32};
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct LengthValue {
   pub amount: f32,
@@ -20,8 +22,7 @@ impl LengthValue {
   #[must_use]
   pub fn from_px(px: i32) -> Self {
     Self {
-      #[allow(clippy::cast_precision_loss)]
-      amount: px as f32,
+      amount: int_to_f32(px),
       unit: LengthUnit::Pixel,
     }
   }
@@ -30,10 +31,11 @@ impl LengthValue {
   pub fn to_px(&self, total_px: i32, scale_factor: Option<f32>) -> i32 {
     let scale_factor = scale_factor.unwrap_or(1.0);
 
-    #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
     match self.unit {
-      LengthUnit::Percentage => (self.amount * total_px as f32) as i32,
-      LengthUnit::Pixel => (self.amount * scale_factor) as i32,
+      LengthUnit::Percentage => {
+        f32_to_int(self.amount * int_to_f32(total_px))
+      }
+      LengthUnit::Pixel => f32_to_int(self.amount * scale_factor),
     }
   }
 
@@ -41,8 +43,7 @@ impl LengthValue {
   pub fn to_percentage(&self, total_px: i32) -> f32 {
     match self.unit {
       LengthUnit::Percentage => self.amount,
-      #[allow(clippy::cast_precision_loss)]
-      LengthUnit::Pixel => self.amount / total_px as f32,
+      LengthUnit::Pixel => self.amount / int_to_f32(total_px),
     }
   }
 }

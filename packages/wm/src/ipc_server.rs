@@ -23,6 +23,7 @@ use crate::{
   traits::{CommonGetters, TilingDirectionGetters},
   user_config::UserConfig,
   wm::WindowManager,
+  wm_state::WmState,
 };
 
 pub struct IpcServer {
@@ -41,8 +42,8 @@ pub struct IpcServer {
 impl IpcServer {
   pub async fn start() -> anyhow::Result<Self> {
     let (message_tx, message_rx) = mpsc::unbounded_channel();
-    let (event_tx, _event_rx) = broadcast::channel(16);
-    let (unsubscribe_tx, _unsubscribe_rx) = broadcast::channel(16);
+    let (event_tx, event_rx) = broadcast::channel(16);
+    let (unsubscribe_tx, unsubscribe_rx) = broadcast::channel(16);
 
     let server_addr = format!("127.0.0.1:{DEFAULT_IPC_PORT}");
     let server = TcpListener::bind(server_addr.clone()).await?;
@@ -64,13 +65,11 @@ impl IpcServer {
 
     Ok(Self {
       abort_handle: task.abort_handle(),
-      #[allow(clippy::used_underscore_binding)]
-      _event_rx,
+      _event_rx: event_rx,
       event_tx,
       message_rx,
       unsubscribe_tx,
-      #[allow(clippy::used_underscore_binding)]
-      _unsubscribe_rx,
+      _unsubscribe_rx: unsubscribe_rx,
     })
   }
 
@@ -166,7 +165,6 @@ impl IpcServer {
     Ok(())
   }
 
-  #[allow(clippy::too_many_lines)]
   fn handle_app_command(
     &self,
     app_command: AppCommand,
@@ -176,73 +174,9 @@ impl IpcServer {
     config: &mut UserConfig,
   ) -> anyhow::Result<ClientResponseData> {
     let response_data = match app_command {
-      AppCommand::Query { command } => match command {
-        QueryCommand::Windows => {
-          ClientResponseData::Windows(WindowsData {
-            windows: wm
-              .state
-              .windows()
-              .into_iter()
-              .map(|window| window.to_dto())
-              .collect::<Result<_, _>>()?,
-          })
-        }
-        QueryCommand::Workspaces => {
-          ClientResponseData::Workspaces(WorkspacesData {
-            workspaces: wm
-              .state
-              .workspaces()
-              .into_iter()
-              .map(|workspace| workspace.to_dto())
-              .collect::<Result<_, _>>()?,
-          })
-        }
-        QueryCommand::Monitors => {
-          ClientResponseData::Monitors(MonitorsData {
-            monitors: wm
-              .state
-              .monitors()
-              .into_iter()
-              .map(|monitor| monitor.to_dto())
-              .collect::<Result<_, _>>()?,
-          })
-        }
-        QueryCommand::BindingModes => {
-          ClientResponseData::BindingModes(BindingModesData {
-            binding_modes: wm.state.binding_modes.clone(),
-          })
-        }
-        QueryCommand::Focused => {
-          let focused_container = wm
-            .state
-            .focused_container()
-            .context("No focused container.")?;
-
-          ClientResponseData::Focused(FocusedData {
-            focused: focused_container.to_dto()?,
-          })
-        }
-        QueryCommand::AppMetadata => {
-          ClientResponseData::AppMetadata(AppMetadataData {
-            version: env!("VERSION_NUMBER").to_string(),
-          })
-        }
-        QueryCommand::TilingDirection => {
-          let direction_container = wm
-            .state
-            .focused_container()
-            .and_then(|focused| focused.direction_container())
-            .context("No direction container.")?;
-
-          ClientResponseData::TilingDirection(TilingDirectionData {
-            direction_container: direction_container.to_dto()?,
-            tiling_direction: direction_container.tiling_direction(),
-          })
-        }
-        QueryCommand::Paused => {
-          ClientResponseData::Paused(wm.state.is_paused)
-        }
-      },
+      AppCommand::Query { command } => {
+        Self::query_response(&command, &wm.state)?
+      }
       AppCommand::Command {
         subject_container_id,
         command,
@@ -258,53 +192,7 @@ impl IpcServer {
         })
       }
       AppCommand::Sub { events } => {
-        let subscription_id = Uuid::new_v4();
-        info!("New event subscription {}: {:?}", subscription_id, events);
-
-        let response_tx = response_tx.clone();
-        let mut event_rx = self.event_tx.subscribe();
-        let mut unsubscribe_rx = self.unsubscribe_tx.subscribe();
-        let mut disconnection_rx = disconnection_tx.subscribe();
-
-        task::spawn(async move {
-          loop {
-            tokio::select! {
-              Ok(()) = disconnection_rx.recv() => {
-                break;
-              }
-              Ok(id) = unsubscribe_rx.recv() => {
-                if id == subscription_id {
-                  break;
-                }
-              }
-              Ok((event_type, event)) = event_rx.recv() => {
-                // Check whether the event is one of the subscribed events.
-                if events.contains(&event_type)
-                  || events.contains(&SubscribableEvent::All)
-                {
-                  let send_result = Self::to_event_subscription_msg(
-                    subscription_id,
-                    event,
-                  )
-                  .and_then(|event_msg| {
-                    response_tx
-                      .send(event_msg)
-                      .map_err(anyhow::Error::from)
-                  });
-
-                  if let Err(err) = send_result {
-                    warn!("Error emitting WM event: {}", err);
-                    break;
-                  }
-                }
-              }
-            }
-          }
-        });
-
-        ClientResponseData::EventSubscribe(EventSubscribeData {
-          subscription_id,
-        })
+        self.subscribe(events, response_tx, disconnection_tx)
       }
       AppCommand::Unsub { subscription_id } => {
         self
@@ -318,6 +206,127 @@ impl IpcServer {
     };
 
     Ok(response_data)
+  }
+
+  /// Builds the response to a `query` command.
+  fn query_response(
+    command: &QueryCommand,
+    state: &WmState,
+  ) -> anyhow::Result<ClientResponseData> {
+    Ok(match command {
+      QueryCommand::Windows => ClientResponseData::Windows(WindowsData {
+        windows: state
+          .windows()
+          .into_iter()
+          .map(|window| window.to_dto())
+          .collect::<Result<_, _>>()?,
+      }),
+      QueryCommand::Workspaces => {
+        ClientResponseData::Workspaces(WorkspacesData {
+          workspaces: state
+            .workspaces()
+            .into_iter()
+            .map(|workspace| workspace.to_dto())
+            .collect::<Result<_, _>>()?,
+        })
+      }
+      QueryCommand::Monitors => {
+        ClientResponseData::Monitors(MonitorsData {
+          monitors: state
+            .monitors()
+            .into_iter()
+            .map(|monitor| monitor.to_dto())
+            .collect::<Result<_, _>>()?,
+        })
+      }
+      QueryCommand::BindingModes => {
+        ClientResponseData::BindingModes(BindingModesData {
+          binding_modes: state.binding_modes.clone(),
+        })
+      }
+      QueryCommand::Focused => {
+        let focused_container =
+          state.focused_container().context("No focused container.")?;
+
+        ClientResponseData::Focused(FocusedData {
+          focused: focused_container.to_dto()?,
+        })
+      }
+      QueryCommand::AppMetadata => {
+        ClientResponseData::AppMetadata(AppMetadataData {
+          version: env!("VERSION_NUMBER").to_string(),
+        })
+      }
+      QueryCommand::TilingDirection => {
+        let direction_container = state
+          .focused_container()
+          .and_then(|focused| focused.direction_container())
+          .context("No direction container.")?;
+
+        ClientResponseData::TilingDirection(TilingDirectionData {
+          direction_container: direction_container.to_dto()?,
+          tiling_direction: direction_container.tiling_direction(),
+        })
+      }
+      QueryCommand::Paused => ClientResponseData::Paused(state.is_paused),
+    })
+  }
+
+  /// Subscribes the client to `events`, forwarding each one until the
+  /// client unsubscribes or disconnects.
+  fn subscribe(
+    &self,
+    events: Vec<SubscribableEvent>,
+    response_tx: &mpsc::UnboundedSender<Message>,
+    disconnection_tx: &broadcast::Sender<()>,
+  ) -> ClientResponseData {
+    let subscription_id = Uuid::new_v4();
+    info!("New event subscription {}: {:?}", subscription_id, events);
+
+    let response_tx = response_tx.clone();
+    let mut event_rx = self.event_tx.subscribe();
+    let mut unsubscribe_rx = self.unsubscribe_tx.subscribe();
+    let mut disconnection_rx = disconnection_tx.subscribe();
+
+    task::spawn(async move {
+      loop {
+        tokio::select! {
+          Ok(()) = disconnection_rx.recv() => {
+            break;
+          }
+          Ok(id) = unsubscribe_rx.recv() => {
+            if id == subscription_id {
+              break;
+            }
+          }
+          Ok((event_type, event)) = event_rx.recv() => {
+            // Check whether the event is one of the subscribed events.
+            if events.contains(&event_type)
+              || events.contains(&SubscribableEvent::All)
+            {
+              let send_result = Self::to_event_subscription_msg(
+                subscription_id,
+                event,
+              )
+              .and_then(|event_msg| {
+                response_tx
+                  .send(event_msg)
+                  .map_err(anyhow::Error::from)
+              });
+
+              if let Err(err) = send_result {
+                warn!("Error emitting WM event: {}", err);
+                break;
+              }
+            }
+          }
+        }
+      }
+    });
+
+    ClientResponseData::EventSubscribe(EventSubscribeData {
+      subscription_id,
+    })
   }
 
   fn to_client_response_msg(

@@ -26,16 +26,11 @@ pub fn resize_window(
           })
           .and_then(|parent_width| {
             let (horizontal_gap, _) = tiling_window.inner_gaps().ok()?;
+            let sibling_count =
+              i32::try_from(tiling_window.tiling_siblings().count())
+                .ok()?;
 
-            #[allow(
-              clippy::cast_possible_wrap,
-              clippy::cast_possible_truncation
-            )]
-            Some(
-              parent_width
-                - horizontal_gap
-                  * tiling_window.tiling_siblings().count() as i32,
-            )
+            Some(parent_width - horizontal_gap * sibling_count)
           }),
         _ => window.parent().and_then(|parent| {
           parent.to_rect().ok().map(|rect| rect.width())
@@ -60,16 +55,11 @@ pub fn resize_window(
           })
           .and_then(|parent_height| {
             let (_, vertical_gap) = tiling_window.inner_gaps().ok()?;
+            let sibling_count =
+              i32::try_from(tiling_window.tiling_siblings().count())
+                .ok()?;
 
-            #[allow(
-              clippy::cast_possible_wrap,
-              clippy::cast_possible_truncation
-            )]
-            Some(
-              parent_height
-                - vertical_gap
-                  * tiling_window.tiling_siblings().count() as i32,
-            )
+            Some(parent_height - vertical_gap * sibling_count)
           }),
         _ => window.parent().and_then(|parent| {
           parent.to_rect().ok().map(|rect| rect.height())

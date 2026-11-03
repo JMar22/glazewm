@@ -19,7 +19,7 @@ use crate::{
   models::{
     Container, DirectionContainer, InsertionTarget,
     NativeWindowProperties, NonTilingWindow, TilingContainer,
-    WindowContainer,
+    WindowContainer, WindowInit,
   },
   traits::{
     CommonGetters, PositionGetters, TilingDirectionGetters,
@@ -51,37 +51,25 @@ struct TilingWindowInner {
 }
 
 impl TilingWindow {
-  #[allow(clippy::too_many_arguments)]
-  pub fn new(
-    id: Option<Uuid>,
-    native: NativeWindow,
-    properties: NativeWindowProperties,
-    prev_state: Option<WindowState>,
-    border_delta: RectDelta,
-    floating_placement: Rect,
-    has_custom_floating_placement: bool,
-    gaps_config: GapsConfig,
-    done_window_rules: Vec<WindowRuleConfig>,
-    active_drag: Option<ActiveDrag>,
-  ) -> Self {
+  pub fn new(init: WindowInit, gaps_config: GapsConfig) -> Self {
     let window = TilingWindowInner {
-      id: id.unwrap_or_else(Uuid::new_v4),
+      id: init.id.unwrap_or_else(Uuid::new_v4),
       parent: None,
       children: VecDeque::new(),
       child_focus_order: VecDeque::new(),
       tiling_size: 1.0,
-      native,
-      native_properties: properties,
+      native: init.native,
+      native_properties: init.properties,
       state: WindowState::Tiling,
-      prev_state,
+      prev_state: init.prev_state,
       display_state: DisplayState::Shown,
-      border_delta,
+      border_delta: init.border_delta,
       has_pending_dpi_adjustment: false,
-      floating_placement,
-      has_custom_floating_placement,
+      floating_placement: init.floating_placement,
+      has_custom_floating_placement: init.has_custom_floating_placement,
       gaps_config,
-      done_window_rules,
-      active_drag,
+      done_window_rules: init.done_window_rules,
+      active_drag: init.active_drag,
     };
 
     Self(Rc::new(RefCell::new(window)))
@@ -93,17 +81,20 @@ impl TilingWindow {
     insertion_target: Option<InsertionTarget>,
   ) -> NonTilingWindow {
     NonTilingWindow::new(
-      Some(self.id()),
-      self.native().clone(),
-      self.native_properties().clone(),
+      WindowInit {
+        id: Some(self.id()),
+        native: self.native().clone(),
+        properties: self.native_properties().clone(),
+        prev_state: Some(WindowState::Tiling),
+        border_delta: self.border_delta(),
+        floating_placement: self.floating_placement(),
+        has_custom_floating_placement: self
+          .has_custom_floating_placement(),
+        done_window_rules: self.done_window_rules(),
+        active_drag: self.active_drag(),
+      },
       state,
-      Some(WindowState::Tiling),
-      self.border_delta(),
       insertion_target,
-      self.floating_placement(),
-      self.has_custom_floating_placement(),
-      self.done_window_rules(),
-      self.active_drag(),
     )
   }
 
@@ -124,8 +115,7 @@ impl TilingWindow {
       display_state: self.display_state(),
       border_delta: self.border_delta(),
       floating_placement: self.floating_placement(),
-      #[allow(clippy::cast_possible_wrap, clippy::unnecessary_cast)]
-      handle: self.native().id().0 as isize,
+      handle: self.native().id().0,
       title: self.native_properties().title,
       #[cfg(target_os = "windows")]
       class_name: self.native_properties().class_name,

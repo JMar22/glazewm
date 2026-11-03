@@ -13,9 +13,8 @@ use crate::{
   wm_state::WmState,
 };
 
-#[allow(clippy::needless_pass_by_value)]
 pub fn remove_monitor(
-  monitor: Monitor,
+  monitor: &Monitor,
   state: &mut WmState,
   config: &UserConfig,
 ) -> anyhow::Result<()> {
@@ -49,7 +48,7 @@ pub fn remove_monitor(
     });
   }
 
-  detach_container(monitor.clone().into())?;
+  detach_container(&monitor.clone().into())?;
 
   state.emit_event(WmEvent::MonitorRemoved {
     removed_id: monitor.id(),

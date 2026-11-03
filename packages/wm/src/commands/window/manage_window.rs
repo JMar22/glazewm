@@ -10,7 +10,7 @@ use crate::{
   },
   models::{
     Container, Monitor, NativeWindowProperties, NonTilingWindow,
-    TilingWindow, WindowContainer,
+    TilingWindow, WindowContainer, WindowInit,
   },
   traits::{CommonGetters, PositionGetters, WindowGetters},
   user_config::UserConfig,
@@ -200,31 +200,26 @@ fn create_window(
   // `adjust_borders` command.
   let border_delta = RectDelta::zero();
 
+  let init = WindowInit {
+    id: None,
+    native: native_window,
+    properties: native_properties,
+    prev_state: None,
+    border_delta,
+    floating_placement,
+    has_custom_floating_placement: false,
+    done_window_rules: Vec::new(),
+    active_drag: None,
+  };
+
   let window_container: WindowContainer = match window_state {
-    WindowState::Tiling => TilingWindow::new(
-      None,
-      native_window,
-      native_properties,
-      None,
-      border_delta,
-      floating_placement,
-      false,
-      gaps_config,
-      Vec::new(),
-      None,
-    )
-    .into(),
+    WindowState::Tiling => TilingWindow::new(init, gaps_config).into(),
     _ => NonTilingWindow::new(
-      None,
-      native_window,
-      native_properties,
+      WindowInit {
+        has_custom_floating_placement: !prefers_centered,
+        ..init
+      },
       window_state,
-      None,
-      border_delta,
-      None,
-      floating_placement,
-      !prefers_centered,
-      Vec::new(),
       None,
     )
     .into(),

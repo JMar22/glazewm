@@ -11,18 +11,17 @@ use crate::{
   wm_state::WmState,
 };
 
-#[allow(clippy::needless_pass_by_value)]
 pub fn unmanage_window(
-  window: WindowContainer,
+  window: &WindowContainer,
   state: &mut WmState,
 ) -> anyhow::Result<()> {
   // Create iterator of parent, grandparent, and great-grandparent.
   let ancestors = window.ancestors().take(3).collect::<Vec<_>>();
 
   // Get container to switch focus to after the window has been removed.
-  let focus_target = state.focus_target_after_removal(&window.clone());
+  let focus_target = state.focus_target_after_removal(window);
 
-  detach_container(window.clone().into())?;
+  detach_container(&window.clone().into())?;
 
   // After detaching the container, flatten any redundant split containers.
   // For example, in the layout V[1 H[2]] where container 1 is detached to
@@ -33,8 +32,7 @@ pub fn unmanage_window(
 
   state.emit_event(WmEvent::WindowUnmanaged {
     unmanaged_id: window.id(),
-    #[allow(clippy::cast_possible_wrap, clippy::unnecessary_cast)]
-    unmanaged_handle: window.native().id().0 as isize,
+    unmanaged_handle: window.native().id().0,
   });
 
   // The window is gone before it could be redrawn out of fullscreen, so

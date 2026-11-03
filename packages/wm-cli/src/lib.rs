@@ -1,10 +1,19 @@
 #![warn(clippy::all, clippy::pedantic)]
-#![allow(clippy::missing_errors_doc)]
 
 use anyhow::Context;
 use wm_common::ClientResponseData;
 use wm_ipc_client::IpcClient;
 
+/// Sends the command in `args` (after the program name) to the running WM
+/// and prints its response as JSON.
+///
+/// Event subscriptions keep printing each event as it arrives.
+///
+/// # Errors
+///
+/// Returns an error if the WM's IPC server can't be reached, if sending
+/// the command or receiving a response fails, or if a response can't be
+/// serialized for printing.
 pub async fn start(args: Vec<String>) -> anyhow::Result<()> {
   let mut client = IpcClient::connect().await?;
 

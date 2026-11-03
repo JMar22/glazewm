@@ -12,13 +12,18 @@ use wm_common::{
 };
 use wm_platform::{Direction, NativeWindow, Rect, RectDelta};
 
-#[allow(clippy::wildcard_imports)]
 use crate::{
   models::{
     Monitor, NativeWindowProperties, NonTilingWindow, RootContainer,
     SplitContainer, TilingWindow, Workspace,
   },
-  traits::*,
+  traits::{
+    ambassador_impl_CommonGetters, ambassador_impl_PositionGetters,
+    ambassador_impl_TilingDirectionGetters,
+    ambassador_impl_TilingSizeGetters, ambassador_impl_WindowGetters,
+    Ancestors, CommonGetters, Descendants, PositionGetters,
+    TilingDirectionGetters, TilingSizeGetters, WindowGetters,
+  },
   user_config::UserConfig,
 };
 

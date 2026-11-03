@@ -81,7 +81,7 @@ pub fn focus_workspace(
       });
 
     if let Some(workspace) = workspace_to_destroy {
-      deactivate_workspace(workspace, state)?;
+      deactivate_workspace(&workspace, state)?;
     }
 
     // Save the currently focused workspace as recent.

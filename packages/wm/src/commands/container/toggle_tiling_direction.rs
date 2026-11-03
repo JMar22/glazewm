@@ -56,7 +56,7 @@ fn toggle_window_direction(
         Ok(workspace.into())
       }
       DirectionContainer::Split(split_container) => {
-        flatten_split_container(split_container.clone())?;
+        flatten_split_container(&split_container)?;
 
         tiling_window
           .direction_container()

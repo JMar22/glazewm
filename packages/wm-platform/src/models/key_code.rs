@@ -68,14 +68,20 @@ macro_rules! impl_key_code_conversion {
           $(Key::$variant => {
             #[cfg(target_os = "windows")]
             {
-              $(return Ok(KeyCode($win_code.0));)?
-              #[allow(unreachable_code)]
-              return Err(KeyConversionError::UnknownKeyCode(KeyCode(0)));
+              impl_key_code_conversion!(@key_code $($win_code)?)
             }
           }),*
         }
       }
     }
+  };
+
+  // A key's code, or an error for a key without one.
+  (@key_code $win_code:expr) => {
+    Ok(KeyCode($win_code.0))
+  };
+  (@key_code) => {
+    Err(KeyConversionError::UnknownKeyCode(KeyCode(0)))
   };
 }
 

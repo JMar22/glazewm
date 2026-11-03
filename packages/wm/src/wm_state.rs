@@ -144,7 +144,7 @@ impl WmState {
     config: &mut UserConfig,
   ) -> anyhow::Result<()> {
     // Get the originally focused window when the WM was started.
-    let focused_window = self.dispatcher.focused_window().ok();
+    let focused_window = self.dispatcher.focused_window();
 
     // Create a monitor, and consequently a workspace, for each detected
     // native monitor.
@@ -177,10 +177,9 @@ impl WmState {
       }
     }
 
-    let container_to_focus = focused_window
-      .and_then(|focused_window| {
-        self.window_from_native(&focused_window).map(Into::into)
-      })
+    let container_to_focus = self
+      .window_from_native(&focused_window)
+      .map(Into::into)
       .or_else(|| self.windows().pop().map(Into::into))
       .or_else(|| self.workspaces().pop().map(Into::into))
       .context("Failed to get container to focus.")?;
@@ -239,9 +238,7 @@ impl WmState {
     native_window: &NativeWindow,
   ) -> Option<Monitor> {
     self
-      .monitor_from_native(
-        &self.dispatcher.nearest_display(native_window).ok()?,
-      )
+      .monitor_from_native(&self.dispatcher.nearest_display(native_window))
       .or(self.monitors().first().cloned())
   }
 
@@ -389,7 +386,6 @@ impl WmState {
   ///
   /// Returns a tuple of the workspace name and the `Workspace` instance
   /// if active.
-  #[allow(clippy::too_many_lines)]
   pub fn workspace_by_target(
     &self,
     origin_workspace: &Workspace,
@@ -398,7 +394,6 @@ impl WmState {
   ) -> anyhow::Result<(Option<String>, Option<Workspace>)> {
     let (name, workspace) = match target {
       WorkspaceTarget::Name(name) => {
-        #[allow(clippy::match_bool)]
         match origin_workspace.config().name == name {
           false => (Some(name.clone()), self.workspace_by_name(&name)),
           // Toggle the workspace if it's already focused.
@@ -419,41 +414,27 @@ impl WmState {
           .as_ref()
           .and_then(|name| self.workspace_by_name(name)),
       ),
-      WorkspaceTarget::NextActive => {
+      target @ (WorkspaceTarget::NextActive
+      | WorkspaceTarget::PreviousActive) => {
         let active_workspaces = self.sorted_workspaces(config);
         let origin_index = active_workspaces
           .iter()
           .position(|workspace| workspace.id() == origin_workspace.id())
           .context("Failed to get index of given workspace.")?;
 
-        let next_active_workspace = active_workspaces
-          .get(origin_index + 1)
-          .or_else(|| active_workspaces.first());
-
-        (
-          next_active_workspace.map(|workspace| workspace.config().name),
-          next_active_workspace.cloned(),
-        )
-      }
-      WorkspaceTarget::PreviousActive => {
-        let active_workspaces = self.sorted_workspaces(config);
-        let origin_index = active_workspaces
-          .iter()
-          .position(|workspace| workspace.id() == origin_workspace.id())
-          .context("Failed to get index of given workspace.")?;
-
-        let prev_active_workspace = active_workspaces.get(
-          origin_index
-            .checked_sub(1)
-            .unwrap_or(active_workspaces.len() - 1),
+        let workspace = wrapping_neighbor(
+          &active_workspaces,
+          origin_index,
+          matches!(target, WorkspaceTarget::NextActive),
         );
 
         (
-          prev_active_workspace.map(|workspace| workspace.config().name),
-          prev_active_workspace.cloned(),
+          workspace.map(|workspace| workspace.config().name),
+          workspace.cloned(),
         )
       }
-      WorkspaceTarget::NextActiveInMonitor => {
+      target @ (WorkspaceTarget::NextActiveInMonitor
+      | WorkspaceTarget::PreviousActiveInMonitor) => {
         let monitor = origin_workspace
           .monitor()
           .context("No monitor in workspace")?;
@@ -466,42 +447,18 @@ impl WmState {
           .position(|workspace| workspace.id() == origin_workspace.id())
           .context("Failed to get index of give workspace")?;
 
-        let next_active_workspace_in_monitor = workspace_in_monitor
-          .get(origin_index + 1)
-          .or_else(|| workspace_in_monitor.first());
-
-        (
-          next_active_workspace_in_monitor
-            .map(|workspace| workspace.config().name),
-          next_active_workspace_in_monitor.cloned(),
-        )
-      }
-      WorkspaceTarget::PreviousActiveInMonitor => {
-        let monitor = origin_workspace
-          .monitor()
-          .context("No monitor in workspace")?;
-
-        let mut workspace_in_monitor = monitor.workspaces();
-        config.sort_workspaces(&mut workspace_in_monitor);
-
-        let origin_index = workspace_in_monitor
-          .iter()
-          .position(|workspace| workspace.id() == origin_workspace.id())
-          .context("Failed to get index of give workspace")?;
-
-        let prev_active_workspace_in_monitor = workspace_in_monitor.get(
-          origin_index
-            .checked_sub(1)
-            .unwrap_or(workspace_in_monitor.len() - 1),
+        let workspace = wrapping_neighbor(
+          &workspace_in_monitor,
+          origin_index,
+          matches!(target, WorkspaceTarget::NextActiveInMonitor),
         );
 
         (
-          prev_active_workspace_in_monitor
-            .map(|workspace| workspace.config().name),
-          prev_active_workspace_in_monitor.cloned(),
+          workspace.map(|workspace| workspace.config().name),
+          workspace.cloned(),
         )
       }
-      WorkspaceTarget::Next => {
+      target @ (WorkspaceTarget::Next | WorkspaceTarget::Previous) => {
         let workspaces = &config.value.workspaces;
         let origin_name = origin_workspace.config().name.clone();
         let origin_index = workspaces
@@ -509,39 +466,18 @@ impl WmState {
           .position(|workspace| workspace.name == origin_name)
           .context("Failed to get index of given workspace.")?;
 
-        let next_workspace_config = workspaces
-          .get(origin_index + 1)
-          .or_else(|| workspaces.first());
+        let workspace_name = wrapping_neighbor(
+          workspaces,
+          origin_index,
+          matches!(target, WorkspaceTarget::Next),
+        )
+        .map(|config| config.name.clone());
 
-        let next_workspace_name =
-          next_workspace_config.map(|config| config.name.clone());
-
-        let next_workspace = next_workspace_name
+        let workspace = workspace_name
           .as_ref()
           .and_then(|name| self.workspace_by_name(name));
 
-        (next_workspace_name, next_workspace)
-      }
-      WorkspaceTarget::Previous => {
-        let workspaces = &config.value.workspaces;
-        let origin_name = origin_workspace.config().name.clone();
-        let origin_index = workspaces
-          .iter()
-          .position(|workspace| workspace.name == origin_name)
-          .context("Failed to get index of given workspace.")?;
-
-        let previous_workspace_config = workspaces.get(
-          origin_index.checked_sub(1).unwrap_or(workspaces.len() - 1),
-        );
-
-        let previous_workspace_name =
-          previous_workspace_config.map(|config| config.name.clone());
-
-        let previous_workspace = previous_workspace_name
-          .as_ref()
-          .and_then(|name| self.workspace_by_name(name));
-
-        (previous_workspace_name, previous_workspace)
+        (workspace_name, workspace)
       }
 
       WorkspaceTarget::Direction(direction) => {
@@ -663,23 +599,6 @@ impl WmState {
       .or(Some(workspace.into()))
   }
 
-  /// Returns all containers that contain the given point.
-  #[allow(clippy::unused_self)]
-  pub fn containers_at_point(
-    &self,
-    origin_container: &Container,
-    point: &Point,
-  ) -> Vec<Container> {
-    origin_container
-      .descendants()
-      .filter(|descendant| {
-        descendant
-          .to_rect()
-          .is_ok_and(|rect| rect.contains_point(point))
-      })
-      .collect()
-  }
-
   /// Returns the monitor that contains the given point.
   pub fn monitor_at_point(&self, point: &Point) -> Option<Monitor> {
     self
@@ -708,7 +627,7 @@ impl WmState {
 
     for window in invalid_windows {
       tracing::info!("Removing invalid window: {}", window);
-      unmanage_window(window, self)?;
+      unmanage_window(&window, self)?;
     }
 
     // Prune ignored windows that are no longer valid.
@@ -744,5 +663,55 @@ impl Drop for WmState {
           .set_transparency(&OpacityValue::from_alpha(u8::MAX));
       }
     }
+  }
+}
+
+/// Returns all descendants of `origin_container` that contain the given
+/// point.
+pub fn containers_at_point(
+  origin_container: &Container,
+  point: &Point,
+) -> Vec<Container> {
+  origin_container
+    .descendants()
+    .filter(|descendant| {
+      descendant
+        .to_rect()
+        .is_ok_and(|rect| rect.contains_point(point))
+    })
+    .collect()
+}
+
+/// Gets the item after (`next`) or before `index` in `items`, wrapping
+/// around at either end.
+fn wrapping_neighbor<T>(
+  items: &[T],
+  index: usize,
+  next: bool,
+) -> Option<&T> {
+  if next {
+    items.get(index + 1).or_else(|| items.first())
+  } else {
+    index
+      .checked_sub(1)
+      .and_then(|index| items.get(index))
+      .or_else(|| items.last())
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::wrapping_neighbor;
+
+  #[test]
+  fn wrapping_neighbor_steps_and_wraps() {
+    let items = [1, 2, 3];
+
+    assert_eq!(wrapping_neighbor(&items, 0, true), Some(&2));
+    assert_eq!(wrapping_neighbor(&items, 2, true), Some(&1));
+    assert_eq!(wrapping_neighbor(&items, 1, false), Some(&1));
+    assert_eq!(wrapping_neighbor(&items, 0, false), Some(&3));
+    assert_eq!(wrapping_neighbor(&[1], 0, true), Some(&1));
+    assert_eq!(wrapping_neighbor(&[1], 0, false), Some(&1));
   }
 }

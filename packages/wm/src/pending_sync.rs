@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use uuid::Uuid;
 
@@ -7,8 +7,24 @@ use crate::{
   traits::CommonGetters,
 };
 
+/// An update, besides redraws and reorders, that the next sync applies.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum PendingUpdate {
+  /// Native focus should be reassigned to the WM's focused container.
+  Focus,
+
+  /// Window effects for the focused window should be updated.
+  FocusedEffect,
+
+  /// Window effects for all windows should be updated.
+  AllEffects,
+
+  /// The cursor should jump to the focused container (if enabled in user
+  /// config).
+  CursorJump,
+}
+
 #[derive(Debug, Default)]
-#[allow(clippy::struct_excessive_bools)]
 pub struct PendingSync {
   /// Containers (and their descendants) that have a pending redraw.
   containers_to_redraw: HashMap<Uuid, Container>,
@@ -17,38 +33,21 @@ pub struct PendingSync {
   /// focused window's state should be brought to the front.
   workspaces_to_reorder: Vec<Workspace>,
 
-  /// Whether native focus should be reassigned to the WM's focused
-  /// container.
-  needs_focus_update: bool,
-
-  /// Whether window effect for the focused window should be updated.
-  needs_focused_effect_update: bool,
-
-  /// Whether window effects for all windows should be updated.
-  needs_all_effects_update: bool,
-
-  /// Whether to jump the cursor to the focused container (if enabled in
-  /// user config).
-  needs_cursor_jump: bool,
+  /// Other updates queued for the next sync.
+  updates: HashSet<PendingUpdate>,
 }
 
 impl PendingSync {
   pub fn has_changes(&self) -> bool {
     !self.containers_to_redraw.is_empty()
       || !self.workspaces_to_reorder.is_empty()
-      || self.needs_focus_update
-      || self.needs_focused_effect_update
-      || self.needs_all_effects_update
-      || self.needs_cursor_jump
+      || !self.updates.is_empty()
   }
 
   pub fn clear(&mut self) -> &mut Self {
     self.containers_to_redraw.clear();
     self.workspaces_to_reorder.clear();
-    self.needs_focus_update = false;
-    self.needs_focused_effect_update = false;
-    self.needs_all_effects_update = false;
-    self.needs_cursor_jump = false;
+    self.updates.clear();
     self
   }
 
@@ -97,39 +96,39 @@ impl PendingSync {
   }
 
   pub fn queue_focus_change(&mut self) -> &mut Self {
-    self.needs_focus_update = true;
+    self.updates.insert(PendingUpdate::Focus);
     self
   }
 
   pub fn queue_focused_effect_update(&mut self) -> &mut Self {
-    self.needs_focused_effect_update = true;
+    self.updates.insert(PendingUpdate::FocusedEffect);
     self
   }
 
   pub fn queue_all_effects_update(&mut self) -> &mut Self {
-    self.needs_all_effects_update = true;
+    self.updates.insert(PendingUpdate::AllEffects);
     self
   }
 
   pub fn queue_cursor_jump(&mut self) -> &mut Self {
-    self.needs_cursor_jump = true;
+    self.updates.insert(PendingUpdate::CursorJump);
     self
   }
 
   pub fn needs_focus_update(&self) -> bool {
-    self.needs_focus_update
+    self.updates.contains(&PendingUpdate::Focus)
   }
 
   pub fn needs_focused_effect_update(&self) -> bool {
-    self.needs_focused_effect_update
+    self.updates.contains(&PendingUpdate::FocusedEffect)
   }
 
   pub fn needs_all_effects_update(&self) -> bool {
-    self.needs_all_effects_update
+    self.updates.contains(&PendingUpdate::AllEffects)
   }
 
   pub fn needs_cursor_jump(&self) -> bool {
-    self.needs_cursor_jump
+    self.updates.contains(&PendingUpdate::CursorJump)
   }
 
   pub fn containers_to_redraw(&self) -> &HashMap<Uuid, Container> {

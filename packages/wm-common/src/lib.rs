@@ -1,8 +1,8 @@
 #![warn(clippy::all, clippy::pedantic)]
-#![allow(clippy::missing_errors_doc)]
 
 mod active_drag;
 mod app_command;
+mod command_target;
 mod display_state;
 mod dtos;
 mod hide_corner;
@@ -15,6 +15,7 @@ mod wm_event;
 
 pub use active_drag::*;
 pub use app_command::*;
+pub use command_target::*;
 pub use display_state::*;
 pub use dtos::*;
 pub use hide_corner::*;

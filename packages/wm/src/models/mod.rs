@@ -7,6 +7,7 @@ mod non_tiling_window;
 mod root_container;
 mod split_container;
 mod tiling_window;
+mod window_init;
 mod workspace;
 mod workspace_target;
 
@@ -19,5 +20,6 @@ pub use non_tiling_window::*;
 pub use root_container::*;
 pub use split_container::*;
 pub use tiling_window::*;
+pub use window_init::*;
 pub use workspace::*;
 pub use workspace_target::*;

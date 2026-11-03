@@ -16,11 +16,9 @@ use windows::{
   },
 };
 
+use super::size_of_u32;
 use crate::{
-  display::{
-    ConnectionState, DisplayDeviceId, DisplayId, MirroringState,
-    OutputTechnology,
-  },
+  display::{DisplayDeviceId, DisplayId, MirroringState},
   Dispatcher, NativeWindow, Point, Rect,
 };
 
@@ -65,9 +63,9 @@ impl Display {
 
   /// Implements [`Display::scale_factor`].
   pub(crate) fn scale_factor(&self) -> crate::Result<f32> {
-    let dpi = self.dpi()?;
-    #[allow(clippy::cast_precision_loss)]
-    Ok(dpi as f32 / 96.0)
+    // DPI values are small enough for `f32` to hold exactly.
+    let dpi = u16::try_from(self.dpi()?)?;
+    Ok(f32::from(dpi) / 96.0)
   }
 
   /// Implements [`Display::dpi`].
@@ -104,12 +102,13 @@ impl Display {
       .trim_end_matches('\0')
       .to_string();
 
+    let device_size = size_of_u32::<DISPLAY_DEVICEW>()?;
+
     // Get the display devices associated with the display's adapter.
     let devices = (0u32..)
       .map_while(|index| {
-        #[allow(clippy::cast_possible_truncation)]
         let mut device = DISPLAY_DEVICEW {
-          cb: std::mem::size_of::<DISPLAY_DEVICEW>() as u32,
+          cb: device_size,
           ..Default::default()
         };
 
@@ -145,7 +144,7 @@ impl Display {
       .find(|device| {
         matches!(
           device.mirroring_state(),
-          Ok(None | Some(MirroringState::Source))
+          None | Some(MirroringState::Source)
         )
       })
       .ok_or(crate::Error::DisplayDeviceNotFound)
@@ -160,8 +159,7 @@ impl Display {
   fn monitor_info_ex(&self) -> crate::Result<MONITORINFOEXW> {
     let mut monitor_info = MONITORINFOEXW {
       monitorInfo: MONITORINFO {
-        #[allow(clippy::cast_possible_truncation)]
-        cbSize: std::mem::size_of::<MONITORINFOEXW>() as u32,
+        cbSize: size_of_u32::<MONITORINFOEXW>()?,
         ..Default::default()
       },
       ..Default::default()
@@ -253,35 +251,12 @@ impl DisplayDevice {
   }
 
   /// Implements [`DisplayDevice::refresh_rate`].
-  #[allow(clippy::unnecessary_wraps)]
   pub(crate) fn refresh_rate(&self) -> crate::Result<f32> {
-    #[allow(clippy::cast_precision_loss)]
-    Ok(self.current_device_mode()?.dmDisplayFrequency as f32)
-  }
+    // Refresh rates are small enough for `f32` to hold exactly.
+    let frequency =
+      u16::try_from(self.current_device_mode()?.dmDisplayFrequency)?;
 
-  /// Implements [`DisplayDevice::is_builtin`].
-  #[allow(clippy::unnecessary_wraps, clippy::unused_self)]
-  pub(crate) fn is_builtin(&self) -> crate::Result<bool> {
-    // TODO: Use `DisplayConfigGetDeviceInfo` to determine whether the
-    // output technology is internal.
-    Ok(false)
-  }
-
-  /// Implements [`DisplayDevice::connection_state`].
-  #[allow(clippy::unnecessary_wraps, clippy::unused_self)]
-  pub(crate) fn connection_state(&self) -> crate::Result<ConnectionState> {
-    // TODO: Detect disconnected state.
-    Ok(ConnectionState::Active)
-  }
-
-  /// Implements [`DisplayDevice::mirroring_state`].
-  #[allow(clippy::unnecessary_wraps, clippy::unused_self)]
-  pub(crate) fn mirroring_state(
-    &self,
-  ) -> crate::Result<Option<MirroringState>> {
-    // TODO: Implement mirroring detection using
-    // `DisplayConfigGetDeviceInfo`.
-    Ok(None)
+    Ok(f32::from(frequency))
   }
 
   /// Implements [`DisplayDeviceExtWindows::hardware_id`].
@@ -294,20 +269,10 @@ impl DisplayDevice {
       .map(ToString::to_string)
   }
 
-  /// Implements [`DisplayDeviceExtWindows::output_technology`].
-  #[allow(clippy::unnecessary_wraps, clippy::unused_self)]
-  pub(crate) fn output_technology(
-    &self,
-  ) -> crate::Result<Option<OutputTechnology>> {
-    // TODO: Use `DisplayConfigGetDeviceInfo` to get the output technology.
-    Ok(Some(OutputTechnology::Unknown))
-  }
-
   /// Gets the current device mode.
   fn current_device_mode(&self) -> crate::Result<DEVMODEW> {
-    #[allow(clippy::cast_possible_truncation)]
     let mut device_mode = DEVMODEW {
-      dmSize: std::mem::size_of::<DEVMODEW>() as u16,
+      dmSize: u16::try_from(std::mem::size_of::<DEVMODEW>())?,
       ..Default::default()
     };
 
@@ -340,10 +305,7 @@ impl From<DisplayDevice> for crate::DisplayDevice {
 pub(crate) fn all_displays(
   _: &Dispatcher,
 ) -> crate::Result<Vec<crate::Display>> {
-  let mut monitor_handles: Vec<isize> = Vec::new();
-
   // Callback for `EnumDisplayMonitors` to collect monitor handles.
-  #[allow(clippy::items_after_statements)]
   extern "system" fn monitor_enum_proc(
     handle: HMONITOR,
     _hdc: HDC,
@@ -357,6 +319,8 @@ pub(crate) fn all_displays(
     unsafe { (*handles).push(handle.0) };
     true.into()
   }
+
+  let mut monitor_handles: Vec<isize> = Vec::new();
 
   unsafe {
     EnumDisplayMonitors(
@@ -388,11 +352,10 @@ pub(crate) fn all_display_devices(
 }
 
 /// Implements [`Dispatcher::display_from_point`].
-#[allow(clippy::unnecessary_wraps)]
 pub(crate) fn display_from_point(
   point: &Point,
   _: &Dispatcher,
-) -> crate::Result<crate::Display> {
+) -> crate::Display {
   let handle = unsafe {
     MonitorFromPoint(
       POINT {
@@ -403,30 +366,26 @@ pub(crate) fn display_from_point(
     )
   };
 
-  Ok(Display::new(handle.0).into())
+  Display::new(handle.0).into()
 }
 
 /// Implements [`Dispatcher::primary_display`].
-#[allow(clippy::unnecessary_wraps)]
-pub(crate) fn primary_display(
-  _: &Dispatcher,
-) -> crate::Result<crate::Display> {
+pub(crate) fn primary_display(_: &Dispatcher) -> crate::Display {
   let handle = unsafe {
     MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTOPRIMARY)
   };
 
-  Ok(Display::new(handle.0).into())
+  Display::new(handle.0).into()
 }
 
 /// Implements [`Dispatcher::nearest_display`].
-#[allow(clippy::unnecessary_wraps)]
 pub(crate) fn nearest_display(
   native_window: &NativeWindow,
   _: &Dispatcher,
-) -> crate::Result<crate::Display> {
+) -> crate::Display {
   let handle = unsafe {
     MonitorFromWindow(native_window.inner.hwnd(), MONITOR_DEFAULTTONEAREST)
   };
 
-  Ok(Display::new(handle.0).into())
+  Display::new(handle.0).into()
 }

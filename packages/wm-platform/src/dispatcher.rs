@@ -73,6 +73,11 @@ pub trait DispatcherExtWindows {
   /// Returns a unique ID that can be passed to
   /// `deregister_wndproc_callback` to remove the callback.
   ///
+  /// # Errors
+  ///
+  /// Returns [`Error::WindowMessage`](crate::Error::WindowMessage) if the callback can't be posted to
+  /// the event loop thread to be installed.
+  ///
   /// # Platform-specific
   ///
   /// This method is only available on Windows.
@@ -83,6 +88,11 @@ pub trait DispatcherExtWindows {
 
   /// Removes a previously registered window procedure callback by its ID.
   ///
+  /// # Errors
+  ///
+  /// Returns [`Error::WindowMessage`](crate::Error::WindowMessage) if the removal can't be posted to the
+  /// event loop thread.
+  ///
   /// # Platform-specific
   ///
   /// This method is only available on Windows.
@@ -90,12 +100,20 @@ pub trait DispatcherExtWindows {
 
   /// Gets whether system-wide window transition animations are enabled.
   ///
+  /// # Errors
+  ///
+  /// Returns an error if `SystemParametersInfoW` fails.
+  ///
   /// # Platform-specific
   ///
   /// This method is only available on Windows.
   fn window_animations_enabled(&self) -> crate::Result<bool>;
 
   /// Enables or disables system-wide window transition animations.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if `SystemParametersInfoW` fails.
   ///
   /// # Platform-specific
   ///
@@ -106,6 +124,10 @@ pub trait DispatcherExtWindows {
   ) -> crate::Result<()>;
 
   /// Gets whether the current session's workstation is locked.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if `WTSQuerySessionInformationW` fails.
   ///
   /// # Platform-specific
   ///
@@ -131,6 +153,10 @@ pub trait DispatcherExtWindows {
   /// Windows 11 uses for Start, Search, and quick settings, which are not
   /// menus as far as the window manager is concerned.
   ///
+  /// # Errors
+  ///
+  /// Returns an error if `GetGUIThreadInfo` fails.
+  ///
   /// # Platform-specific
   ///
   /// This method is only available on Windows.
@@ -146,11 +172,20 @@ pub trait DispatcherExtWindows {
   ///
   /// TODO: Remove this. Handle environment variable expansion in a
   /// unified, cross-platform way.
+  ///
+  /// # Errors
+  ///
+  /// Returns [`Error::Platform`](crate::Error::Platform) if `ExpandEnvironmentStringsW` fails.
   fn expand_env_strings(&self, input: &str) -> crate::Result<String>;
 
   /// Runs the specified program using `ShellExecuteExW`.
   ///
   /// If `hide_window` is `true`, the spawned process window is hidden.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if `ShellExecuteExW` fails, e.g. because the program
+  /// can't be found.
   ///
   /// # Platform-specific
   ///
@@ -191,8 +226,7 @@ impl DispatcherExtWindows for Dispatcher {
 
   fn window_animations_enabled(&self) -> crate::Result<bool> {
     let mut animation_info = ANIMATIONINFO {
-      #[allow(clippy::cast_possible_truncation)]
-      cbSize: std::mem::size_of::<ANIMATIONINFO>() as u32,
+      cbSize: platform_impl::size_of_u32::<ANIMATIONINFO>()?,
       iMinAnimate: 0,
     };
 
@@ -213,8 +247,7 @@ impl DispatcherExtWindows for Dispatcher {
     enable: bool,
   ) -> crate::Result<()> {
     let mut animation_info = ANIMATIONINFO {
-      #[allow(clippy::cast_possible_truncation)]
-      cbSize: std::mem::size_of::<ANIMATIONINFO>() as u32,
+      cbSize: platform_impl::size_of_u32::<ANIMATIONINFO>()?,
       iMinAnimate: i32::from(enable),
     };
 
@@ -280,8 +313,7 @@ impl DispatcherExtWindows for Dispatcher {
 
   fn is_menu_open(&self) -> crate::Result<bool> {
     let mut info = GUITHREADINFO {
-      #[allow(clippy::cast_possible_truncation)]
-      cbSize: std::mem::size_of::<GUITHREADINFO>() as u32,
+      cbSize: platform_impl::size_of_u32::<GUITHREADINFO>()?,
       ..Default::default()
     };
 
@@ -336,8 +368,7 @@ impl DispatcherExtWindows for Dispatcher {
       .collect::<Vec<_>>();
 
     let mut exec_info = SHELLEXECUTEINFOW {
-      #[allow(clippy::cast_possible_truncation)]
-      cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
+      cbSize: platform_impl::size_of_u32::<SHELLEXECUTEINFOW>()?,
       lpFile: PCWSTR(program_wide.as_ptr()),
       lpParameters: PCWSTR(args_wide.as_ptr()),
       lpDirectory: PCWSTR(directory_wide.as_ptr()),
@@ -398,6 +429,11 @@ impl Dispatcher {
   ///
   /// After calling this method, all subsequent calls to `dispatch_async()`
   /// and `dispatch_sync()` will return `Error::EventLoopStopped`.
+  ///
+  /// # Errors
+  ///
+  /// Returns [`Error::WindowMessage`](crate::Error::WindowMessage) if the quit message can't be
+  /// posted to the event loop thread.
   pub fn stop_event_loop(&self) -> crate::Result<()> {
     // Set stopped flag to prevent new dispatches.
     self.stopped.store(true, Ordering::SeqCst);
@@ -417,6 +453,12 @@ impl Dispatcher {
   ///
   /// Returns `Ok(())` if the closure was successfully queued. No result is
   /// returned.
+  ///
+  /// # Errors
+  ///
+  /// Returns [`Error::EventLoopStopped`](crate::Error::EventLoopStopped) if the event loop
+  /// has been stopped, or [`Error::WindowMessage`](crate::Error::WindowMessage)
+  /// if the closure can't be posted to the event loop thread.
   pub fn dispatch_async<F>(&self, dispatch_fn: F) -> crate::Result<()>
   where
     F: FnOnce() + Send + 'static,
@@ -446,7 +488,17 @@ impl Dispatcher {
   /// executed directly.
   ///
   /// Returns a `Result` with the closure's return value.
-  #[allow(clippy::missing_panics_doc)]
+  ///
+  /// # Errors
+  ///
+  /// Returns [`Error::EventLoopStopped`](crate::Error::EventLoopStopped) if the event loop
+  /// has been stopped, or [`Error::ChannelRecv`](crate::Error::ChannelRecv) if the
+  /// closure's result doesn't arrive within 5 seconds.
+  ///
+  /// # Panics
+  ///
+  /// Panics if called on a mock dispatcher (`Dispatcher::mock`), which has
+  /// no event loop.
   pub fn dispatch_sync<F, R>(&self, dispatch_fn: F) -> crate::Result<R>
   where
     F: FnOnce() -> R + Send,
@@ -471,7 +523,7 @@ impl Dispatcher {
       if result_tx.send(result).is_err() {
         tracing::error!("Failed to send closure result.");
       }
-    })?;
+    });
 
     result_rx
       .recv_timeout(std::time::Duration::from_secs(5))
@@ -479,7 +531,11 @@ impl Dispatcher {
   }
 
   /// Gets the thread ID of the event loop thread.
-  #[allow(clippy::missing_panics_doc)]
+  ///
+  /// # Panics
+  ///
+  /// Panics if called on a mock dispatcher (`Dispatcher::mock`), which has
+  /// no event loop.
   #[must_use]
   pub fn thread_id(&self) -> ThreadId {
     // TODO: Block until event loop source is set.
@@ -497,6 +553,10 @@ impl Dispatcher {
   /// NOTE: Does not guarantee a specific, consistent order.
   ///
   /// Returns all displays that are currently active and available for use.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if `EnumDisplayMonitors` fails.
   pub fn displays(&self) -> crate::Result<Vec<Display>> {
     platform_impl::all_displays(self)
   }
@@ -510,6 +570,10 @@ impl Dispatcher {
   /// TODO: Remove this. Instead, call `sort_monitors` after populating WM
   /// state. Need to assign workspaces after sorting monitors because of
   /// `bind_to_monitor`.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if the displays or their bounds can't be read.
   pub fn sorted_displays(&self) -> crate::Result<Vec<Display>> {
     let displays = platform_impl::all_displays(self)?;
 
@@ -543,6 +607,10 @@ impl Dispatcher {
   ///
   /// Returns all display devices including active, inactive, and
   /// disconnected ones.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if the displays or their devices can't be read.
   pub fn display_devices(&self) -> crate::Result<Vec<DisplayDevice>> {
     platform_impl::all_display_devices(self)
   }
@@ -550,15 +618,14 @@ impl Dispatcher {
   /// Gets the display containing the specified point.
   ///
   /// If no display contains the point, returns the primary display.
-  pub fn display_from_point(
-    &self,
-    point: &Point,
-  ) -> crate::Result<Display> {
+  #[must_use]
+  pub fn display_from_point(&self, point: &Point) -> Display {
     platform_impl::display_from_point(point, self)
   }
 
   /// Gets the primary display.
-  pub fn primary_display(&self) -> crate::Result<Display> {
+  #[must_use]
+  pub fn primary_display(&self) -> Display {
     platform_impl::primary_display(self)
   }
 
@@ -566,10 +633,8 @@ impl Dispatcher {
   ///
   /// Returns the display that contains the largest area of the window's
   /// frame. Defaults to the primary display if no overlap is found.
-  pub fn nearest_display(
-    &self,
-    native_window: &NativeWindow,
-  ) -> crate::Result<Display> {
+  #[must_use]
+  pub fn nearest_display(&self, native_window: &NativeWindow) -> Display {
     platform_impl::nearest_display(native_window, self)
   }
 
@@ -579,6 +644,10 @@ impl Dispatcher {
   ///
   /// Returns a vector of `NativeWindow` instances for windows that are
   /// not hidden and on the current virtual desktop.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if `EnumWindows` fails.
   pub fn visible_windows(&self) -> crate::Result<Vec<NativeWindow>> {
     platform_impl::visible_windows(self)
   }
@@ -586,11 +655,16 @@ impl Dispatcher {
   /// Gets the currently focused (foreground) window.
   ///
   /// This may be the desktop window if no window has focus.
-  pub fn focused_window(&self) -> crate::Result<NativeWindow> {
+  #[must_use]
+  pub fn focused_window(&self) -> NativeWindow {
     platform_impl::focused_window(self)
   }
 
   /// Gets the current cursor position.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if `GetCursorPos` fails.
   pub fn cursor_position(&self) -> crate::Result<Point> {
     #[cfg(target_os = "windows")]
     {
@@ -622,14 +696,19 @@ impl Dispatcher {
   }
 
   /// Gets the top-level window at the specified point.
+  #[must_use]
   pub fn window_from_point(
     &self,
     point: &Point,
-  ) -> crate::Result<Option<crate::NativeWindow>> {
+  ) -> Option<crate::NativeWindow> {
     platform_impl::window_from_point(point, self)
   }
 
   /// Sets the cursor position to the specified coordinates.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if `SetCursorPos` fails.
   pub fn set_cursor_position(&self, point: &Point) -> crate::Result<()> {
     #[cfg(target_os = "windows")]
     {
@@ -640,6 +719,11 @@ impl Dispatcher {
   }
 
   /// Removes focus from the current window and focuses the desktop.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if the desktop window can't be focused (see
+  /// [`NativeWindow::focus`]).
   pub fn reset_focus(&self) -> crate::Result<()> {
     platform_impl::reset_focus(self)
   }
@@ -649,6 +733,11 @@ impl Dispatcher {
   /// # Platform-specific
   ///
   /// - **Windows**: Uses `explorer` to open the file explorer.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if `path` can't be canonicalized, e.g. because it
+  /// doesn't exist, or if `explorer` can't be spawned.
   pub fn open_file_explorer(&self, path: &Path) -> crate::Result<()> {
     #[cfg(target_os = "windows")]
     {
@@ -664,7 +753,6 @@ impl Dispatcher {
   /// Shows a modal error dialog with the given title and message.
   ///
   /// Blocks the current thread until the user dismisses the dialog.
-  #[allow(clippy::missing_panics_doc)]
   pub fn show_error_dialog(&self, title: &str, message: &str) {
     #[cfg(target_os = "windows")]
     {

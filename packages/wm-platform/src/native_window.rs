@@ -47,12 +47,22 @@ pub trait NativeWindowWindowsExt {
 
   /// Gets the class name of the window.
   ///
+  /// # Errors
+  ///
+  /// Returns an error if `GetClassNameW` fails, e.g. because the window
+  /// no longer exists.
+  ///
   /// # Platform-specific
   ///
   /// This method is only available on Windows.
   fn class_name(&self) -> crate::Result<String>;
 
   /// Gets the window's frame, including the window's shadow borders.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if `GetWindowRect` fails, e.g. because the window
+  /// no longer exists.
   ///
   /// # Platform-specific
   ///
@@ -61,6 +71,12 @@ pub trait NativeWindowWindowsExt {
 
   /// Gets the delta between the window's frame and the window's border.
   /// This represents the size of a window's shadow borders.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if the window's frame or its frame with shadows
+  /// can't be read (see [`NativeWindow::frame`] and
+  /// [`NativeWindowWindowsExt::frame_with_shadows`]).
   ///
   /// # Platform-specific
   ///
@@ -97,6 +113,10 @@ pub trait NativeWindowWindowsExt {
 
   /// Thin wrapper around [`SetWindowPos`](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setwindowpos).
   ///
+  /// # Errors
+  ///
+  /// Returns an error if `SetWindowPos` fails.
+  ///
   /// # Platform-specific
   ///
   /// This method is only available on Windows.
@@ -111,12 +131,20 @@ pub trait NativeWindowWindowsExt {
   ///
   /// NOTE: Cloaked windows do not get shown until uncloaked.
   ///
+  /// # Errors
+  ///
+  /// Returns an error if `ShowWindowAsync` fails.
+  ///
   /// # Platform-specific
   ///
   /// This method is only available on Windows.
   fn show(&self) -> crate::Result<()>;
 
   /// Hides the window asynchronously.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if `ShowWindowAsync` fails.
   ///
   /// # Platform-specific
   ///
@@ -129,12 +157,22 @@ pub trait NativeWindowWindowsExt {
   /// specified position. This avoids flickering compared to restoring
   /// and then repositioning the window.
   ///
+  /// # Errors
+  ///
+  /// Returns an error if `ShowWindowAsync` fails or, when `outer_frame` is
+  /// provided, if `SetWindowPlacement` fails.
+  ///
   /// # Platform-specific
   ///
   /// This method is only available on Windows.
   fn restore(&self, outer_frame: Option<&Rect>) -> crate::Result<()>;
 
   /// Cloaks or uncloaks the window.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if the shell's COM interfaces are unavailable, if no
+  /// application view exists for the window, or if cloaking it fails.
   ///
   /// # Platform-specific
   ///
@@ -158,6 +196,11 @@ pub trait NativeWindowWindowsExt {
   /// Causes the native Windows taskbar to be moved to the bottom of the
   /// z-order when this window is active.
   ///
+  /// # Errors
+  ///
+  /// Returns an error if the taskbar's COM interface is unavailable or
+  /// `MarkFullscreenWindow` fails.
+  ///
   /// # Platform-specific
   ///
   /// This method is only available on Windows.
@@ -171,13 +214,18 @@ pub trait NativeWindowWindowsExt {
   /// # Platform-specific
   ///
   /// This method is only available on Windows.
-  fn window_above(&self) -> crate::Result<Option<crate::NativeWindow>>;
+  fn window_above(&self) -> Option<crate::NativeWindow>;
 
   /// Adds or removes the window from the native taskbar.
   ///
   /// Cloaked windows are normally always shown in the taskbar, but can be
   /// manually toggled. Hidden windows (`SW_HIDE`) can never be shown in
   /// the taskbar.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if the taskbar's COM interface is unavailable or
+  /// adding or removing the window's tab fails.
   ///
   /// # Platform-specific
   ///
@@ -193,12 +241,23 @@ pub trait NativeWindowWindowsExt {
 
   /// Sets the window's z-order.
   ///
+  /// # Errors
+  ///
+  /// Returns an error if `SetWindowPos` fails. The follow-up call made
+  /// shortly afterwards, in case the z-order did not stick, is not
+  /// checked.
+  ///
   /// # Platform-specific
   ///
   /// This method is only available on Windows.
   fn set_z_order(&self, zorder: &WindowZOrder) -> crate::Result<()>;
 
   /// Sets the visibility of the window's title bar.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if the window's style changes and the `SetWindowPos`
+  /// call that applies the change fails.
   ///
   /// # Platform-specific
   ///
@@ -207,12 +266,22 @@ pub trait NativeWindowWindowsExt {
 
   /// Sets the color of the window's border.
   ///
+  /// # Errors
+  ///
+  /// Returns an error if `DwmSetWindowAttribute` fails, e.g. on Windows
+  /// versions without the border color attribute.
+  ///
   /// # Platform-specific
   ///
   /// This method is only available on Windows.
   fn set_border_color(&self, color: Option<&Color>) -> crate::Result<()>;
 
   /// Sets the corner style of the window.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if `DwmSetWindowAttribute` fails, e.g. on Windows
+  /// versions without the corner preference attribute.
   ///
   /// # Platform-specific
   ///
@@ -224,6 +293,10 @@ pub trait NativeWindowWindowsExt {
 
   /// Sets the transparency of the window.
   ///
+  /// # Errors
+  ///
+  /// Returns an error if `SetLayeredWindowAttributes` fails.
+  ///
   /// # Platform-specific
   ///
   /// This method is only available on Windows.
@@ -233,6 +306,13 @@ pub trait NativeWindowWindowsExt {
   ) -> crate::Result<()>;
 
   /// Adjusts the window's transparency by a relative delta.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if the window's current transparency can't be read,
+  /// if the window uses a color key rather than alpha for its transparency
+  /// ([`Error::Platform`](crate::Error::Platform)), or if setting the new
+  /// transparency fails.
   ///
   /// # Platform-specific
   ///
@@ -314,7 +394,7 @@ impl NativeWindowWindowsExt for NativeWindow {
     self.inner.mark_fullscreen(fullscreen)
   }
 
-  fn window_above(&self) -> crate::Result<Option<crate::NativeWindow>> {
+  fn window_above(&self) -> Option<crate::NativeWindow> {
     self.inner.window_above()
   }
 
@@ -376,13 +456,22 @@ impl NativeWindow {
   ///
   /// Note that empty strings are valid window titles.
   ///
-  /// # Errors
+  /// # Platform-specific
   ///
-  /// Returns [`Error::WindowNotFound`] if the window is invalid.
-  pub fn title(&self) -> crate::Result<String> {
+  /// - **Windows**: A window that no longer exists reads as having an
+  ///   empty title.
+  #[must_use]
+  pub fn title(&self) -> String {
     self.inner.title()
   }
 
+  /// Gets the file name of the window's process executable, without its
+  /// extension.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if the window's process can't be opened or queried
+  /// for its executable path.
   pub fn process_name(&self) -> crate::Result<String> {
     self.inner.process_name()
   }
@@ -392,16 +481,31 @@ impl NativeWindow {
   /// # Platform-specific
   ///
   /// - **Windows**: Includes the window's shadow borders.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if the frame can't be read from DWM or from
+  /// `GetWindowRect`, e.g. because the window no longer exists.
   pub fn frame(&self) -> crate::Result<Rect> {
     self.inner.frame()
   }
 
   /// Gets the window's position as (x, y) coordinates.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if the window's frame can't be read (see
+  /// [`NativeWindow::frame`]).
   pub fn position(&self) -> crate::Result<(f64, f64)> {
     self.inner.position()
   }
 
   /// Gets the window's size as (width, height).
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if the window's frame can't be read (see
+  /// [`NativeWindow::frame`]).
   pub fn size(&self) -> crate::Result<(f64, f64)> {
     self.inner.size()
   }
@@ -415,27 +519,36 @@ impl NativeWindow {
   }
 
   /// Whether the window is actually visible.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if the window's cloaked state can't be read from
+  /// DWM.
   pub fn is_visible(&self) -> crate::Result<bool> {
     self.inner.is_visible()
   }
 
   /// Whether the window is minimized.
-  pub fn is_minimized(&self) -> crate::Result<bool> {
+  #[must_use]
+  pub fn is_minimized(&self) -> bool {
     self.inner.is_minimized()
   }
 
   /// Whether the window is maximized.
-  pub fn is_maximized(&self) -> crate::Result<bool> {
+  #[must_use]
+  pub fn is_maximized(&self) -> bool {
     self.inner.is_maximized()
   }
 
   /// Whether the window can be resized.
-  pub fn is_resizable(&self) -> crate::Result<bool> {
+  #[must_use]
+  pub fn is_resizable(&self) -> bool {
     self.inner.is_resizable()
   }
 
   /// Whether the window is the OS's desktop window.
-  pub fn is_desktop_window(&self) -> crate::Result<bool> {
+  #[must_use]
+  pub fn is_desktop_window(&self) -> bool {
     self.inner.is_desktop_window()
   }
 
@@ -446,29 +559,57 @@ impl NativeWindow {
   /// - **Windows**: Automatically adjusts the `rect` prior to calling [`SetWindowPos`](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setwindowpos)
   ///   to include the window's shadow borders. To set the window's
   ///   position directly, use [`NativeWindowWindowsExt::set_window_pos`].
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if `SetWindowPos` fails.
   pub fn set_frame(&self, rect: &Rect) -> crate::Result<()> {
     self.inner.set_frame(rect)
   }
 
   /// Resizes the window to the specified size.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if `SetWindowPos` fails.
   pub fn resize(&self, width: i32, height: i32) -> crate::Result<()> {
     self.inner.resize(width, height)
   }
 
   /// Repositions the window to the specified position.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if `SetWindowPos` fails.
   pub fn reposition(&self, x: i32, y: i32) -> crate::Result<()> {
     self.inner.reposition(x, y)
   }
 
+  /// Minimizes the window asynchronously.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if `ShowWindowAsync` fails.
   pub fn minimize(&self) -> crate::Result<()> {
     self.inner.minimize()
   }
 
+  /// Maximizes the window asynchronously.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if `ShowWindowAsync` fails.
   pub fn maximize(&self) -> crate::Result<()> {
     self.inner.maximize()
   }
 
   /// Sets focus to the window and raises it to the top of the z-order.
+  ///
+  /// # Errors
+  ///
+  /// Returns [`Error::Platform`](crate::Error::Platform) if Windows refuses
+  /// to make the window the foreground window, which it does while another
+  /// process holds the foreground.
   pub fn focus(&self) -> crate::Result<()> {
     self.inner.focus()
   }
@@ -478,6 +619,10 @@ impl NativeWindow {
   /// # Platform-specific
   ///
   /// - **Windows**: This sends a `WM_CLOSE` message to the window.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if sending the message fails.
   pub fn close(&self) -> crate::Result<()> {
     self.inner.close()
   }

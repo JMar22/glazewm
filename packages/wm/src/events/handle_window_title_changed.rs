@@ -1,5 +1,5 @@
 use tracing::info;
-use wm_common::{try_warn, WindowRuleEvent};
+use wm_common::WindowRuleEvent;
 use wm_platform::NativeWindow;
 
 use crate::{
@@ -17,7 +17,7 @@ pub fn handle_window_title_changed(
   if let Some(window) = found_window {
     info!("Window title changed: {window}");
 
-    let title = try_warn!(window.native().title());
+    let title = window.native().title();
 
     window.update_native_properties(|properties| {
       properties.title = title;

@@ -1,6 +1,7 @@
 use anyhow::Context;
 use tracing::{info, warn};
 use wm_common::WindowState;
+use wm_platform::int_to_f32;
 
 use crate::{
   commands::container::{
@@ -96,10 +97,9 @@ fn set_tiling(
     state,
   )?;
 
-  #[allow(clippy::cast_precision_loss)]
   if let Some(insertion_target) = &insertion_target {
-    let size_scale = (insertion_target.prev_sibling_count + 1) as f32
-      / (tiling_window.tiling_siblings().count() + 1) as f32;
+    let size_scale = int_to_f32(insertion_target.prev_sibling_count + 1)
+      / int_to_f32(tiling_window.tiling_siblings().count() + 1);
 
     // Scale the window's previous size based on the current number of
     // siblings. E.g. if the window was 0.5 with 1 sibling, and now has 2

@@ -15,6 +15,13 @@ pub struct DisplayListener {
 
 impl DisplayListener {
   /// Creates a new [`DisplayListener`].
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if the listener's window procedure callback or its
+  /// power notification registration can't be dispatched to the event
+  /// loop thread. Failing to watch the display's power state is only
+  /// logged.
   pub fn new(dispatcher: &Dispatcher) -> crate::Result<Self> {
     let (event_tx, event_rx) = mpsc::unbounded_channel();
     let inner = platform_impl::DisplayListener::new(event_tx, dispatcher)?;
@@ -29,6 +36,11 @@ impl DisplayListener {
   }
 
   /// Terminates the display listener.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if the cleanup can't be dispatched to the event loop
+  /// thread.
   pub fn terminate(&mut self) -> crate::Result<()> {
     self.inner.terminate()
   }
