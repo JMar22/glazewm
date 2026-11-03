@@ -3,6 +3,7 @@ extern crate libtest_mimic_collect;
 
 mod dispatcher;
 mod display;
+mod display_listener;
 mod error;
 mod event_loop;
 mod keybinding_listener;
@@ -11,11 +12,13 @@ mod mouse_listener;
 mod native_window;
 mod platform_event;
 mod platform_impl;
+mod single_instance;
 mod thread_bound;
 mod window_listener;
 
 pub use dispatcher::*;
 pub use display::*;
+pub use display_listener::*;
 pub use error::*;
 pub use event_loop::*;
 pub use keybinding_listener::*;
@@ -23,6 +26,7 @@ pub use models::*;
 pub use mouse_listener::*;
 pub use native_window::*;
 pub use platform_event::*;
+pub use single_instance::*;
 pub use thread_bound::*;
 pub use window_listener::*;
 
