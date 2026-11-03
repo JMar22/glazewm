@@ -27,8 +27,7 @@ pub use thread_bound::*;
 pub use window_listener::*;
 
 pub fn main() {
-  // Due to macOS requiring the main thread for some UI APIs, these
-  // tests must execute on the main thread. Until this is natively
+  // These tests execute on the main thread. Until this is natively
   // supported via cargo's test harness, we use `libtest_mimic_collect`.
   //
   // To run these tests, run `cargo test <...args> -- --test-threads=1`.

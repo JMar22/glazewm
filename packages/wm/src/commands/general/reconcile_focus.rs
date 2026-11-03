@@ -152,15 +152,6 @@ pub fn reconcile_stranded_focus(
   Ok(())
 }
 
-#[cfg(not(target_os = "windows"))]
-#[allow(clippy::unnecessary_wraps)]
-pub fn reconcile_stranded_focus(
-  _state: &mut WmState,
-  _config: &UserConfig,
-) -> anyhow::Result<()> {
-  Ok(())
-}
-
 /// Whether the user has left, so there is nobody to hand focus back to.
 ///
 /// That is the case while the workstation is locked and while the display

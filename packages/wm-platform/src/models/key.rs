@@ -10,7 +10,6 @@ use serde::{Deserialize, Serialize};
 /// # Platform-specific
 ///
 /// - **Windows**: `u16` (Virtual key code from Windows API). See <https://learn.microsoft.com/en-us/windows/win32/inputdev/virtual-key-codes>
-/// - **macOS**: `i64` (Virtual key code from `CGEvent`). See <https://developer.apple.com/documentation/coregraphics/cgeventfield/keyboardeventkeycode>
 #[derive(
   Debug,
   Copy,
@@ -23,10 +22,7 @@ use serde::{Deserialize, Serialize};
   Serialize,
   Deserialize,
 )]
-pub struct KeyCode(
-  #[cfg(target_os = "windows")] pub(crate) u16,
-  #[cfg(target_os = "macos")] pub(crate) i64,
-);
+pub struct KeyCode(pub(crate) u16);
 
 impl fmt::Display for KeyCode {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -206,20 +202,11 @@ pub enum Key {
 impl Key {
   /// Attempts to parse a key from a literal string (e.g. `a`, `;`, `à`).
   ///
-  /// # Platform-specific
-  ///
-  /// - **macOS**: Not implemented. Returns `KeyParseError::UnknownKey` for
-  ///   all keys.
-  ///
   /// # Errors
   ///
   /// Returns `KeyParseError::UnknownKey` if the key is not found on the
   /// current keyboard layout.
   pub fn try_from_literal(key_str: &str) -> Result<Self, KeyParseError> {
-    #[cfg(target_os = "macos")]
-    {
-      Err(KeyParseError::UnknownKey(key_str.to_string()))
-    }
     #[cfg(target_os = "windows")]
     {
       use windows::Win32::UI::Input::KeyboardAndMouse::{

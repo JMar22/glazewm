@@ -81,7 +81,6 @@ pub fn platform_sync(
 fn sync_focus(
   focused_container: &Container,
   state: &mut WmState,
-  #[cfg_attr(not(target_os = "windows"), allow(unused_variables))]
   config: &UserConfig,
 ) -> anyhow::Result<()> {
   let native_window = focused_container.as_window_container().ok();
@@ -320,9 +319,6 @@ fn redraw_containers(
     };
 
     // Set the z-order of the window.
-    //
-    // NOTE: macOS doesn't have a robust public API for setting the z-order
-    // of a window. See `NativeWindow::raise` for more details.
     #[cfg(target_os = "windows")]
     if should_bring_to_front && !windows_to_redraw.contains(window) {
       tracing::info!("Updating window z-order: {window}");
@@ -533,8 +529,6 @@ fn should_sync_taskbar_visibility(
 fn reposition_window(
   window: &WindowContainer,
   hide_corner: HideCorner,
-  // LINT: `z_order` is only used on Windows.
-  #[cfg_attr(not(target_os = "windows"), allow(unused_variables))]
   z_order: &WindowZOrder,
   is_visible: bool,
   config: &UserConfig,
@@ -582,9 +576,6 @@ fn reposition_window(
   if window.active_drag().is_some() {
     window.native().resize(rect.width(), rect.height())?;
   } else {
-    #[cfg(target_os = "macos")]
-    window.native().set_frame(&rect)?;
-
     #[cfg(target_os = "windows")]
     {
       use wm_platform::{
@@ -717,16 +708,12 @@ fn jump_cursor(
 }
 
 fn apply_window_effects(
-  // LINT: `window` is only used on Windows.
-  #[cfg_attr(not(target_os = "windows"), allow(unused_variables))]
   window: &WindowContainer,
   is_focused: bool,
   config: &UserConfig,
 ) {
   let window_effects = &config.value.window_effects;
 
-  // LINT: `effect_config` is only used on Windows.
-  #[cfg_attr(not(target_os = "windows"), allow(unused_variables))]
   let effect_config = if is_focused {
     &window_effects.focused_window
   } else {

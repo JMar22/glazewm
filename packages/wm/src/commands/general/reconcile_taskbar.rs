@@ -133,12 +133,6 @@ fn has_taskbar_above(
     })
 }
 
-#[cfg(not(target_os = "windows"))]
-#[allow(clippy::unnecessary_wraps)]
-pub fn reconcile_stranded_taskbar(_state: &WmState) -> anyhow::Result<()> {
-  Ok(())
-}
-
 #[cfg(test)]
 mod tests {
   use super::{has_taskbar_above, MAX_WINDOWS_ABOVE};

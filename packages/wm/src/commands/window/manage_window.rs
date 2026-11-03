@@ -95,18 +95,6 @@ fn check_is_manageable(
     return Ok(None);
   }
 
-  #[cfg(target_os = "macos")]
-  {
-    use wm_platform::NativeWindowExtMacOs;
-
-    let is_standard_window = native_window.role()? == "AXWindow"
-      && native_window.subrole()? == "AXStandardWindow";
-
-    if !is_standard_window {
-      return Ok(None);
-    }
-  }
-
   // Ensure window has a valid process name, title, etc.
   let native_properties = NativeWindowProperties::try_from(native_window)?;
 

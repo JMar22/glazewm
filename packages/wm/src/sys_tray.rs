@@ -78,10 +78,6 @@ impl SystemTray {
       {
         dispatcher.window_animations_enabled().unwrap_or(false)
       }
-      #[cfg(not(target_os = "windows"))]
-      {
-        false
-      }
     }));
 
     let run_on_startup_enabled = Arc::new(Mutex::new(
@@ -132,8 +128,6 @@ impl SystemTray {
   }
 
   fn create_tray_icon(
-    // LINT: `animations_enabled` is only used on Windows.
-    #[cfg_attr(not(target_os = "windows"), allow(unused_variables))]
     animations_enabled: bool,
     run_on_startup_enabled: bool,
   ) -> anyhow::Result<TrayIcon> {
@@ -219,8 +213,6 @@ impl SystemTray {
     config_path: &Path,
     config_reload_tx: &mpsc::UnboundedSender<()>,
     exit_tx: &mpsc::UnboundedSender<()>,
-    // LINT: `animations_enabled` is only used on Windows.
-    #[cfg_attr(not(target_os = "windows"), allow(unused_variables))]
     animations_enabled: &Arc<Mutex<bool>>,
     run_on_startup_enabled: &Arc<Mutex<bool>>,
   ) -> anyhow::Result<()> {
@@ -232,12 +224,6 @@ impl SystemTray {
           #[cfg(target_os = "windows")]
           {
             config_path.parent().context("Invalid config path.")?
-          }
-          #[cfg(target_os = "macos")]
-          {
-            // On macOS, pass the file path directly since Finder
-            // navigates one level too high with the parent directory.
-            config_path
           }
         })?;
 
@@ -283,9 +269,6 @@ fn auto_launch_instance() -> anyhow::Result<AutoLaunch> {
 
   #[cfg(target_os = "windows")]
   let instance = AutoLaunch::new("GlazeWM", &exe_path, &args);
-
-  #[cfg(target_os = "macos")]
-  let instance = AutoLaunch::new("GlazeWM", &exe_path, false, &args);
 
   Ok(instance)
 }

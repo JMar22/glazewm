@@ -2,8 +2,6 @@ use std::path::Path;
 
 #[cfg(target_os = "windows")]
 use anyhow::Context;
-#[cfg(target_os = "macos")]
-use shell_util::{CommandOptions, Shell};
 #[cfg(target_os = "windows")]
 use wm_platform::DispatcherExtWindows;
 
@@ -11,8 +9,6 @@ use crate::wm_state::WmState;
 
 pub fn shell_exec(
   command: &str,
-  // LINT: `hide_window` is only used on Windows.
-  #[cfg_attr(not(target_os = "windows"), allow(unused_variables))]
   hide_window: bool,
   state: &WmState,
 ) -> anyhow::Result<()> {
@@ -28,21 +24,13 @@ pub fn shell_exec(
   // held by our process (e.g. the IPC server port) until the subprocess
   // exits.
   let result = {
-    #[cfg(target_os = "macos")]
-    {
-      Shell::spawn(
-        &program,
-        args.split_whitespace(),
-        &CommandOptions::default(),
-      )
-    }
     #[cfg(target_os = "windows")]
     {
       let home_dir =
         home::home_dir().context("Unable to get home directory.")?;
 
-      // TODO: Use `Shell::spawn` instead. `ShellExecuteExW` is still used
-      // to be able to launch programs from the App Paths registry
+      // `ShellExecuteExW` is used to be able to launch programs from the
+      // App Paths registry
       // (`HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths`), like
       // `chrome` without it being in $PATH.
       state.dispatcher.shell_execute_ex(
@@ -91,8 +79,6 @@ pub fn shell_exec(
 /// ```
 fn parse_command(
   command: &str,
-  // LINT: `state` is only used on Windows.
-  #[cfg_attr(not(target_os = "windows"), allow(unused_variables))]
   state: &WmState,
 ) -> anyhow::Result<(String, String)> {
   // Expand environment variables in the command string.
@@ -100,11 +86,6 @@ fn parse_command(
     #[cfg(target_os = "windows")]
     {
       state.dispatcher.expand_env_strings(command)?
-    }
-    #[cfg(target_os = "macos")]
-    {
-      // TODO: Expand env variables on macOS.
-      command.to_string()
     }
   };
 

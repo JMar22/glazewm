@@ -133,12 +133,7 @@ fn find_matching_monitor<'a>(
     let existing = monitor.native_properties();
 
     let is_match = {
-      #[cfg(target_os = "macos")]
-      {
-        existing.device_uuid == properties.device_uuid
-      }
-
-      // On Windows, match the monitor by:
+      // Match the monitor by:
       // 1. Its handle
       // 2. Its device path
       // 3. Its hardware ID (if unique)

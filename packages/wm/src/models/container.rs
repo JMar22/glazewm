@@ -150,10 +150,6 @@ impl std::fmt::Display for WindowContainer {
       {
         self.native_properties().class_name
       }
-      #[cfg(not(target_os = "windows"))]
-      {
-        String::new()
-      }
     };
 
     let process = self.native_properties().process_name;

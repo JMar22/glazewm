@@ -264,10 +264,6 @@ impl UserConfig {
                 match_type.is_match(&window_class)
               })
             }
-            #[cfg(not(target_os = "windows"))]
-            {
-              match_config.window_class.is_none()
-            }
           };
 
           let is_title_match = match_config

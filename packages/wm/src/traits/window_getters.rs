@@ -69,8 +69,6 @@ pub trait WindowGetters: CommonGetters {
 
     #[cfg(target_os = "windows")]
     let shadow_border_delta = self.native_properties().shadow_borders;
-    #[cfg(not(target_os = "windows"))]
-    let shadow_border_delta = RectDelta::zero();
 
     // TODO: Allow percentage length values.
     Ok(RectDelta {

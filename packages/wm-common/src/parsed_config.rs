@@ -96,7 +96,6 @@ pub struct GeneralConfig {
   pub config_reload_commands: Vec<InvokeCommand>,
 
   /// How windows should be hidden when switching workspaces.
-  #[serde(deserialize_with = "deserialize_hide_method")]
   pub hide_method: HideMethod,
 
   /// Affects which windows get shown in the native Windows taskbar.
@@ -113,16 +112,7 @@ impl Default for GeneralConfig {
       startup_commands: vec![],
       shutdown_commands: vec![],
       config_reload_commands: vec![],
-      hide_method: {
-        #[cfg(target_os = "macos")]
-        {
-          HideMethod::PlaceInCorner
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-          HideMethod::Cloak
-        }
-      },
+      hide_method: HideMethod::Cloak,
       show_all_in_taskbar: false,
     }
   }
@@ -451,30 +441,4 @@ where
       Keybinding::new(keys).map_err(serde::de::Error::custom)
     })
     .collect()
-}
-
-/// Helper function for deserializing [`HideMethod`].
-///
-/// On macOS, [`HideMethod::Hide`] and [`HideMethod::Cloak`] are not valid
-/// and are automatically converted to [`HideMethod::PlaceInCorner`].
-fn deserialize_hide_method<'de, D>(
-  deserializer: D,
-) -> Result<HideMethod, D::Error>
-where
-  D: serde::de::Deserializer<'de>,
-{
-  // LINT: The deserialized value is ignored on macOS, but we still want
-  // to produce an error for invalid values.
-  #[allow(unused_variables)]
-  let method = HideMethod::deserialize(deserializer)?;
-
-  #[cfg(target_os = "macos")]
-  {
-    Ok(HideMethod::PlaceInCorner)
-  }
-
-  #[cfg(not(target_os = "macos"))]
-  {
-    Ok(method)
-  }
 }
