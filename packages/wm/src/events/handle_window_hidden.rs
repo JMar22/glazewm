@@ -1,6 +1,8 @@
 use tracing::info;
 use wm_common::{DisplayState, HideMethod};
 use wm_platform::NativeWindow;
+#[cfg(target_os = "windows")]
+use wm_platform::NativeWindowWindowsExt;
 
 use crate::{
   commands::window::unmanage_window, traits::WindowGetters,
@@ -16,6 +18,20 @@ pub fn handle_window_hidden(
 
   if let Some(window) = found_window {
     info!("Window hidden: {window}");
+
+    // The WM only cloaks with this hide method, so a window that lost
+    // `WS_VISIBLE` was hidden by its application (e.g. closed to the
+    // tray). Unmanage it whatever its display state. If the app hides it
+    // while the WM is cloaking it, or while its workspace is hidden, the
+    // checks below would keep it managed as an invisible window that
+    // focus commands still land on.
+    #[cfg(target_os = "windows")]
+    if config.value.general.hide_method == HideMethod::Cloak
+      && !window.native().has_visible_style()
+    {
+      unmanage_window(window, state)?;
+      return Ok(());
+    }
 
     // Update the display state.
     if config.value.general.hide_method != HideMethod::PlaceInCorner

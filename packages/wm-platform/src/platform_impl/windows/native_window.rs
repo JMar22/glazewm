@@ -168,9 +168,12 @@ impl NativeWindow {
 
   /// Implements [`NativeWindow::is_visible`].
   pub(crate) fn is_visible(&self) -> crate::Result<bool> {
-    let is_visible = unsafe { IsWindowVisible(self.hwnd()) }.as_bool();
+    Ok(self.has_visible_style() && !self.is_cloaked()?)
+  }
 
-    Ok(is_visible && !self.is_cloaked()?)
+  /// Implements [`NativeWindowWindowsExt::has_visible_style`].
+  pub(crate) fn has_visible_style(&self) -> bool {
+    unsafe { IsWindowVisible(self.hwnd()) }.as_bool()
   }
 
   /// Implements [`NativeWindow::is_minimized`].
