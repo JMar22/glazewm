@@ -106,10 +106,11 @@ impl DisplayListener {
       move |_hwnd, message, wparam, lparam| {
         match message {
           WM_POWERBROADCAST => {
-            #[allow(clippy::cast_possible_truncation)]
-            match wparam as u32 {
+            // The event is a `DWORD`, so a `wParam` that does not fit one
+            // is no event at all rather than one to truncate.
+            match u32::try_from(wparam) {
               // The console display turned on, off or dimmed.
-              PBT_POWERSETTINGCHANGE => {
+              Ok(PBT_POWERSETTINGCHANGE) => {
                 if let Some(is_off) =
                   console_display_is_off_from_message(lparam)
                 {
@@ -117,11 +118,11 @@ impl DisplayListener {
                 }
               }
               // System is resuming from sleep/hibernation.
-              PBT_APMRESUMEAUTOMATIC | PBT_APMRESUMESUSPEND => {
+              Ok(PBT_APMRESUMEAUTOMATIC | PBT_APMRESUMESUSPEND) => {
                 is_system_suspended.store(false, Ordering::Relaxed);
               }
               // System is entering sleep/hibernation.
-              PBT_APMSUSPEND => {
+              Ok(PBT_APMSUSPEND) => {
                 is_system_suspended.store(true, Ordering::Relaxed);
               }
               _ => {}
@@ -136,7 +137,6 @@ impl DisplayListener {
               if is_system_suspended.load(Ordering::Relaxed) {
                 false
               } else {
-                #[allow(clippy::cast_possible_truncation)]
                 match message {
                   // Received when displays are connected and disconnected,
                   // resolution changes, or arrangement changes.
@@ -146,12 +146,16 @@ impl DisplayListener {
                   // registered or changed. 3rd-party apps like
                   // ButteryTaskbar can trigger this message by calling
                   // `SystemParametersInfo(SPI_SETWORKAREA, ...)`.
-                  WM_SETTINGCHANGE => wparam as u32 == SPI_SETWORKAREA.0,
+                  WM_SETTINGCHANGE => {
+                    u32::try_from(wparam) == Ok(SPI_SETWORKAREA.0)
+                  }
                   // Received when any device is connected or disconnected
                   // (including non-display devices).
                   // TODO: Check if this is actually needed. Previous C#
                   // implementation did not use this.
-                  WM_DEVICECHANGE => wparam as u32 == DBT_DEVNODES_CHANGED,
+                  WM_DEVICECHANGE => {
+                    u32::try_from(wparam) == Ok(DBT_DEVNODES_CHANGED)
+                  }
                   _ => unreachable!(),
                 }
               }
