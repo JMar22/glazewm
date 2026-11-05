@@ -29,6 +29,17 @@ pub fn handle_window_hidden(
     if config.value.general.hide_method == HideMethod::Cloak
       && !window.native().has_visible_style()
     {
+      // The shell drops a window's application view while the window is
+      // hidden, so a cloak the WM put on it can't come off yet. Remember
+      // it for `handle_window_shown`, or `manage_window` would refuse the
+      // window for being cloaked when the app shows it again.
+      if matches!(
+        window.display_state(),
+        DisplayState::Hiding | DisplayState::Hidden
+      ) {
+        state.windows_left_cloaked.insert(window.native().id());
+      }
+
       unmanage_window(&window, state)?;
       return Ok(());
     }

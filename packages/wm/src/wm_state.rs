@@ -98,6 +98,14 @@ pub struct WmState {
   #[cfg(target_os = "windows")]
   pub windows_marked_fullscreen: HashSet<WindowId>,
 
+  /// Windows the WM unmanaged while its cloak was still on them, because
+  /// their application had hidden them.
+  ///
+  /// The cloak can only come off once the window is shown again, and
+  /// nothing but this set says the cloak is the WM's own.
+  #[cfg(target_os = "windows")]
+  pub windows_left_cloaked: HashSet<WindowId>,
+
   /// Whether the initial state has been populated.
   has_initialized: bool,
 
@@ -131,6 +139,8 @@ impl WmState {
       stranded_focus_attempts: 0,
       #[cfg(target_os = "windows")]
       windows_marked_fullscreen: HashSet::new(),
+      #[cfg(target_os = "windows")]
+      windows_left_cloaked: HashSet::new(),
       has_initialized: false,
       event_tx,
       exit_tx,

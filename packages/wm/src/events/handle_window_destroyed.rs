@@ -12,6 +12,10 @@ pub fn handle_window_destroyed(
   native_window_id: WindowId,
   state: &mut WmState,
 ) -> anyhow::Result<()> {
+  // Keep a recycled window handle from inheriting the record.
+  #[cfg(target_os = "windows")]
+  state.windows_left_cloaked.remove(&native_window_id);
+
   let found_window = state
     .windows()
     .into_iter()
