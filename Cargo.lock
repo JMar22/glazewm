@@ -3228,7 +3228,6 @@ dependencies = [
 name = "wm-platform"
 version = "0.0.0"
 dependencies = [
- "home",
  "libtest-mimic-collect",
  "num-traits",
  "regex",
