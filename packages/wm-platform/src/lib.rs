@@ -30,6 +30,8 @@ pub use mouse_listener::*;
 pub use native_window::*;
 pub use num_cast::*;
 pub use platform_event::*;
+#[cfg(target_os = "windows")]
+pub use platform_impl::com::uninitialize_com;
 pub use single_instance::*;
 pub use thread_bound::*;
 pub use window_listener::*;

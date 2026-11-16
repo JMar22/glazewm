@@ -43,7 +43,7 @@ use windows::{
 };
 
 use super::{
-  com::{IApplicationView, COM_INIT},
+  com::{with_com_init, IApplicationView},
   size_of_u32,
 };
 use crate::{
@@ -486,8 +486,8 @@ impl NativeWindow {
 
   /// Implements [`NativeWindowWindowsExt::set_cloaked`].
   pub(crate) fn set_cloaked(&self, cloaked: bool) -> crate::Result<()> {
-    COM_INIT.with(|com_init| -> crate::Result<()> {
-      com_init.borrow_mut().with_retry(|com| {
+    with_com_init(|com_init| {
+      com_init.with_retry(|com| {
         let view_collection = com.application_view_collection()?;
 
         let mut view: Option<IApplicationView> = None;
@@ -517,8 +517,8 @@ impl NativeWindow {
     &self,
     fullscreen: bool,
   ) -> crate::Result<()> {
-    COM_INIT.with(|com_init| -> crate::Result<()> {
-      com_init.borrow_mut().with_retry(|com| {
+    with_com_init(|com_init| {
+      com_init.with_retry(|com| {
         let taskbar_list = com.taskbar_list()?;
 
         unsafe {
@@ -542,8 +542,8 @@ impl NativeWindow {
     &self,
     visible: bool,
   ) -> crate::Result<()> {
-    COM_INIT.with(|com_init| -> crate::Result<()> {
-      com_init.borrow_mut().with_retry(|com| {
+    with_com_init(|com_init| {
+      com_init.with_retry(|com| {
         let taskbar_list = com.taskbar_list()?;
 
         if visible {
