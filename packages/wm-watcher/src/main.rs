@@ -52,9 +52,15 @@ async fn main() -> anyhow::Result<()> {
     let _ = window.set_transparency(&OpacityValue::from_alpha(u8::MAX));
   }
 
-  // Uncloaking uses Shell-owned application-view COM objects whose
-  // thread-local teardown can outlive the work above. This process has no
-  // remaining responsibilities, so exit without waiting on COM teardown.
+  // Uncloaking and the taskbar calls above hold COM objects that live in
+  // Explorer. Release them now, while the process is whole: left to the
+  // thread-local destructor, the release ran inside `ExitProcess` after
+  // every other thread was gone, waited forever for Explorer's reply, and
+  // left an exiting process that could not be terminated.
+  wm_platform::uninitialize_com();
+
+  // This process has no remaining responsibilities, so exit without
+  // shutting down the async runtime.
   std::process::exit(0);
 }
 

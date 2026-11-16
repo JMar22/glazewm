@@ -10,8 +10,8 @@
 
 use std::{env, path::PathBuf, process, time::Duration};
 
-use anyhow::{Context, Error};
-use tokio::{process::Command, signal};
+use anyhow::Context;
+use tokio::signal;
 use tracing::Level;
 use tracing_subscriber::{
   fmt::{self, writer::MakeWriterExt},
@@ -21,9 +21,9 @@ use wm_common::{
   AppCommand, BindingModeConfig, InvokeCommand, Verbosity, WmEvent,
 };
 use wm_platform::{
-  Dispatcher, DisplayListener, EventLoop, Keybinding, KeybindingListener,
-  MouseEventKind, MouseListener, PlatformEvent, SingleInstance,
-  WindowListener,
+  Dispatcher, DispatcherExtWindows, DisplayListener, EventLoop,
+  Keybinding, KeybindingListener, MouseEventKind, MouseListener,
+  PlatformEvent, SingleInstance, WindowListener,
 };
 
 use crate::{
@@ -122,7 +122,7 @@ async fn start_wm(
 
   // Start watcher process for restoring hidden windows on crash.
   #[cfg(target_os = "windows")]
-  start_watcher();
+  start_watcher(dispatcher);
 
   // Start listening for platform events after populating initial state.
   let mut listeners = Listeners::new(&config, dispatcher)?;
@@ -389,8 +389,8 @@ fn update_listeners(
 /// Starts the watcher process that restores hidden windows if the WM
 /// crashes. A failure to start it is logged rather than returned.
 #[cfg(target_os = "windows")]
-fn start_watcher() {
-  if let Err(err) = start_watcher_process() {
+fn start_watcher(dispatcher: &Dispatcher) {
+  if let Err(err) = start_watcher_process(dispatcher) {
     tracing::warn!(
       "Failed to start watcher process: {err}{}",
       cfg!(debug_assertions)
@@ -439,14 +439,27 @@ fn setup_logging(verbosity: &Verbosity) -> anyhow::Result<()> {
 ///
 /// This assumes the watcher binary exists in the same directory as the
 /// WM binary.
-fn start_watcher_process() -> anyhow::Result<tokio::process::Child, Error>
-{
-  let watcher_path = env::current_exe()?
+///
+/// It is started through `ShellExecuteExW`, as `shell-exec` commands are,
+/// so that it inherits none of the WM's handles. The standard library's
+/// `Command` hands a child every inheritable handle, and Winsock creates
+/// sockets inheritable: the watcher held the IPC server's listening
+/// socket, so the port stayed bound for as long as the watcher ran after
+/// the WM, and no new WM could start until it exited.
+fn start_watcher_process(dispatcher: &Dispatcher) -> anyhow::Result<()> {
+  let watcher_dir = env::current_exe()?
     .parent()
     .context("Failed to resolve path to the watcher process.")?
-    .join("glazewm-watcher");
+    .to_path_buf();
 
-  Command::new(&watcher_path)
-    .spawn()
+  let watcher_path = watcher_dir.join("glazewm-watcher.exe");
+
+  dispatcher
+    .shell_execute_ex(
+      &watcher_path.to_string_lossy(),
+      "",
+      &watcher_dir,
+      true,
+    )
     .context("Failed to start watcher process.")
 }

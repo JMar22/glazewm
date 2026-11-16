@@ -21,8 +21,35 @@ thread_local! {
   /// thread that uses it, so we store this in thread-local storage to handle
   /// the setup and cleanup automatically.
   ///
-  /// Wrapped in `RefCell` to allow mutation via `COM_INIT.borrow_mut()`.
-  pub(crate) static COM_INIT: RefCell<ComInit> = RefCell::new(ComInit::new());
+  /// Created on the thread's first COM operation (see `with_com_init`), and
+  /// dropped when the thread exits or by `uninitialize_com`.
+  static COM_INIT: RefCell<Option<ComInit>> = const { RefCell::new(None) };
+}
+
+/// Runs `op` with the calling thread's COM state, initializing COM on the
+/// thread first if this is its first COM operation.
+pub(crate) fn with_com_init<T>(op: impl FnOnce(&mut ComInit) -> T) -> T {
+  COM_INIT.with(|com_init| {
+    op(com_init.borrow_mut().get_or_insert_with(ComInit::new))
+  })
+}
+
+/// Releases the calling thread's COM objects and uninitializes COM on it.
+/// A later COM operation on the thread initializes it again.
+///
+/// A thread that used COM must call this before it exits the process.
+/// Otherwise the release happens in a thread-local destructor, which on
+/// the exiting thread runs inside `ExitProcess`, after Windows has
+/// terminated every other thread. The objects live in Explorer, and
+/// releasing them from a single-threaded apartment hands a call to
+/// Explorer to another thread and waits for its reply — a reply no
+/// thread is left to deliver. The watcher hung there on every exit, and a
+/// process already inside `ExitProcess` cannot be terminated.
+pub fn uninitialize_com() {
+  // Taken out of the cell first, so the release runs with the cell no
+  // longer borrowed.
+  let com_init = COM_INIT.with(RefCell::take);
+  drop(com_init);
 }
 
 pub(crate) struct ComInit {
