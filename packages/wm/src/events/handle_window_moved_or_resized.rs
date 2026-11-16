@@ -191,13 +191,7 @@ fn handle_frame_change(
 
   // Handle a window being maximized or entering fullscreen.
   if is_maximized || should_fullscreen {
-    return adopt_fullscreen(
-      window,
-      is_maximized,
-      should_fullscreen,
-      state,
-      config,
-    );
+    return adopt_fullscreen(window, is_maximized, state, config);
   }
 
   // An application placing its own window as it starts up does not get
@@ -213,6 +207,21 @@ fn handle_frame_change(
     state.pending_sync.queue_container_to_redraw(window.clone());
 
     return Ok(());
+  }
+
+  // The WM can catch an application half way into its own fullscreen,
+  // after it has restored the window and before it has moved it over the
+  // monitor. The window is adopted as the unmaximized fullscreen it is
+  // about to be, rather than sent back to tiling.
+  #[cfg(target_os = "windows")]
+  if is_own_fullscreen_entry_from_maximized_fullscreen(
+    is_maximized,
+    window.native().has_window_style(WS_CAPTION),
+    &window.state(),
+  ) {
+    tracing::info!("Window entering its own fullscreen: {window}");
+
+    return adopt_fullscreen(window, false, state, config);
   }
 
   match window.state() {
@@ -332,33 +341,20 @@ fn should_fullscreen(
 }
 
 /// Moves a window that has been maximized, or has made itself fullscreen,
-/// into the matching fullscreen state.
+/// into the matching fullscreen state: maximized exactly when the window
+/// is.
 fn adopt_fullscreen(
   window: &WindowContainer,
   is_maximized: bool,
-  should_fullscreen: bool,
   state: &mut WmState,
   config: &UserConfig,
 ) -> anyhow::Result<()> {
-  let is_same_state = is_maximized
-    && matches!(
-      window.state(),
-      WindowState::Fullscreen(FullscreenStateConfig {
-        maximized: true,
-        ..
-      })
-    )
-    || should_fullscreen
-      && matches!(
-        window.state(),
-        WindowState::Fullscreen(FullscreenStateConfig {
-          maximized: false,
-          ..
-        })
-      );
-
-  // Ignore if there's no state change.
-  if is_same_state {
+  // Ignore if there's no state change. A maximized window in an
+  // unmaximized fullscreen is a change, although its frame still covers
+  // the workspace: mpv leaving its own fullscreen goes back to maximized,
+  // and keeping the unmaximized state would have the next redraw restore
+  // the window over the taskbar.
+  if is_adopted_fullscreen(&window.state(), is_maximized) {
     return Ok(());
   }
 
@@ -394,6 +390,15 @@ fn adopt_fullscreen(
   // another.
 
   Ok(())
+}
+
+/// Gets whether a window is already in the fullscreen state that
+/// `adopt_fullscreen` would move it into.
+fn is_adopted_fullscreen(state: &WindowState, is_maximized: bool) -> bool {
+  matches!(
+    state,
+    WindowState::Fullscreen(fullscreen) if fullscreen.maximized == is_maximized
+  )
 }
 
 // TODO: Move to shared location. `handle_window_moved_or_resized_end.rs`
@@ -608,6 +613,38 @@ fn is_self_resize_of_maximized_fullscreen(
     )
 }
 
+/// Gets whether a move or resize event is an application on its way into
+/// its own fullscreen out of the maximized fullscreen the WM holds it in.
+///
+/// mpv enters its fullscreen from a maximized window in three steps: it
+/// drops its caption bar, restores the window, and only then moves it over
+/// the monitor. The restore is an event of its own, and the WM can read
+/// the window before the move lands — no longer maximized, and on its
+/// small restored frame, which does not cover the workspace. Taken as the
+/// window being restored from fullscreen, that sent it back to tiling, and
+/// the tiling redraw landed after mpv's move: the window was left in its
+/// tile without a caption bar while mpv held it to be fullscreen.
+///
+/// The missing caption bar is what tells this apart from the user
+/// restoring the window, the same as for
+/// `is_self_resize_of_maximized_fullscreen`.
+#[cfg(any(test, target_os = "windows"))]
+fn is_own_fullscreen_entry_from_maximized_fullscreen(
+  is_maximized: bool,
+  has_caption: bool,
+  state: &WindowState,
+) -> bool {
+  !is_maximized
+    && !has_caption
+    && matches!(
+      state,
+      WindowState::Fullscreen(FullscreenStateConfig {
+        maximized: true,
+        ..
+      })
+    )
+}
+
 /// How long after the WM adopts a window its own placement is read as
 /// startup placement rather than as something the user asked for.
 ///
@@ -660,7 +697,9 @@ mod tests {
   use wm_platform::Rect;
 
   use super::{
-    is_in_corner, is_self_resize_of_maximized_fullscreen,
+    is_adopted_fullscreen, is_in_corner,
+    is_own_fullscreen_entry_from_maximized_fullscreen,
+    is_self_resize_of_maximized_fullscreen,
     is_startup_placement_of_maximized_fullscreen,
     STARTUP_PLACEMENT_PERIOD,
   };
@@ -737,6 +776,82 @@ mod tests {
       false,
       &maximized_fullscreen(),
     ));
+  }
+
+  #[test]
+  fn matches_restore_on_the_way_into_own_fullscreen() {
+    // mpv restores its window, already without a caption bar, before it
+    // moves it over the monitor.
+    assert!(is_own_fullscreen_entry_from_maximized_fullscreen(
+      false,
+      false,
+      &maximized_fullscreen(),
+    ));
+  }
+
+  #[test]
+  fn does_not_match_a_decorated_window_being_restored() {
+    // The user restoring a window leaves its caption bar in place, so it
+    // goes back to the state it had before.
+    assert!(!is_own_fullscreen_entry_from_maximized_fullscreen(
+      false,
+      true,
+      &maximized_fullscreen(),
+    ));
+  }
+
+  #[test]
+  fn does_not_match_a_window_that_is_still_maximized() {
+    assert!(!is_own_fullscreen_entry_from_maximized_fullscreen(
+      true,
+      false,
+      &maximized_fullscreen(),
+    ));
+  }
+
+  #[test]
+  fn does_not_match_own_fullscreen_entry_from_other_states() {
+    // A tiling or floating window has no maximized state to come out of,
+    // and its move over the monitor is adopted when it lands.
+    for state in [
+      WindowState::Tiling,
+      WindowState::Minimized,
+      WindowState::Fullscreen(FullscreenStateConfig {
+        maximized: false,
+        shown_on_top: false,
+      }),
+    ] {
+      assert!(!is_own_fullscreen_entry_from_maximized_fullscreen(
+        false, false, &state,
+      ));
+    }
+  }
+
+  #[test]
+  fn maximizing_an_unmaximized_fullscreen_is_a_state_change() {
+    // mpv leaving its own fullscreen goes back to maximized, with a frame
+    // that still covers the workspace.
+    let unmaximized = WindowState::Fullscreen(FullscreenStateConfig {
+      maximized: false,
+      shown_on_top: false,
+    });
+
+    assert!(!is_adopted_fullscreen(&unmaximized, true));
+    assert!(is_adopted_fullscreen(&unmaximized, false));
+  }
+
+  #[test]
+  fn restoring_a_maximized_fullscreen_is_a_state_change() {
+    assert!(!is_adopted_fullscreen(&maximized_fullscreen(), false));
+    assert!(is_adopted_fullscreen(&maximized_fullscreen(), true));
+  }
+
+  #[test]
+  fn adopting_fullscreen_from_other_states_is_a_state_change() {
+    for state in [WindowState::Tiling, WindowState::Minimized] {
+      assert!(!is_adopted_fullscreen(&state, true));
+      assert!(!is_adopted_fullscreen(&state, false));
+    }
   }
 
   #[test]
