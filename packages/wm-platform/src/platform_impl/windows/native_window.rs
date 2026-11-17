@@ -18,7 +18,8 @@ use windows::{
     },
     UI::{
       Input::KeyboardAndMouse::{
-        SendInput, INPUT, INPUT_0, INPUT_MOUSE, MOUSEINPUT,
+        GetAsyncKeyState, SendInput, INPUT, INPUT_0, INPUT_MOUSE,
+        MOUSEINPUT, VK_MENU,
       },
       WindowsAndMessaging::{
         EnumWindows, GetAncestor, GetClassNameW, GetDesktopWindow,
@@ -44,7 +45,7 @@ use windows::{
 
 use super::{
   com::{with_com_init, IApplicationView},
-  size_of_u32,
+  mask_alt_menu, size_of_u32,
 };
 use crate::{
   Color, CornerStyle, Delta, Dispatcher, LengthValue, OpacityValue, Point,
@@ -314,6 +315,15 @@ impl NativeWindow {
         "SetForegroundWindow was refused for window {:#x}.",
         self.hwnd().0
       )));
+    }
+
+    // A foreground handoff while Alt is held can arm menu activation in
+    // the destination, even if the binding already masked the source.
+    // Read the live state here; this runs outside the keyboard callback.
+    // SAFETY: `VK_MENU` is a valid virtual-key code with no pointers.
+    let alt_state = unsafe { GetAsyncKeyState(i32::from(VK_MENU.0)) };
+    if alt_state.cast_unsigned() & 0x8000 != 0 {
+      mask_alt_menu()?;
     }
 
     Ok(())

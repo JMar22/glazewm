@@ -4,12 +4,15 @@ use windows::Win32::{
   Foundation::{HINSTANCE, LPARAM, LRESULT, WPARAM},
   UI::{
     Input::KeyboardAndMouse::{
-      GetKeyState, GetKeyboardLayout, VkKeyScanExW, VK_LCONTROL, VK_LMENU,
-      VK_LSHIFT, VK_LWIN, VK_RCONTROL, VK_RMENU, VK_RSHIFT, VK_RWIN,
+      GetKeyState, GetKeyboardLayout, SendInput, VkKeyScanExW, INPUT,
+      INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, VIRTUAL_KEY,
+      VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_RCONTROL, VK_RMENU,
+      VK_RSHIFT, VK_RWIN,
     },
     WindowsAndMessaging::{
       CallNextHookEx, SetWindowsHookExW, UnhookWindowsHookEx, HHOOK,
-      KBDLLHOOKSTRUCT, WH_KEYBOARD_LL, WM_KEYDOWN, WM_SYSKEYDOWN,
+      KBDLLHOOKSTRUCT, LLKHF_ALTDOWN, WH_KEYBOARD_LL, WM_KEYDOWN,
+      WM_SYSKEYDOWN,
     },
   },
 };
@@ -86,6 +89,45 @@ impl KeyEvent {
 pub(crate) fn scan_key_for_char(utf16_key: u16) -> i16 {
   let layout = unsafe { GetKeyboardLayout(0) };
   unsafe { VkKeyScanExW(utf16_key, layout) }
+}
+
+/// Prevents Alt release from activating the foreground window's menu.
+///
+/// An intercepted Alt binding hides its trigger key from Windows, leaving
+/// what looks like a lone Alt press. Send an unassigned virtual key so the
+/// eventual Alt release does not enter menu mode. This key has no `Key`
+/// mapping, so it passes through our hook without triggering a binding.
+pub(crate) fn mask_alt_menu() -> crate::Result<()> {
+  let key = KEYBDINPUT {
+    wVk: VIRTUAL_KEY(0xE8),
+    ..Default::default()
+  };
+  let inputs = [
+    INPUT {
+      r#type: INPUT_KEYBOARD,
+      Anonymous: INPUT_0 { ki: key },
+    },
+    INPUT {
+      r#type: INPUT_KEYBOARD,
+      Anonymous: INPUT_0 {
+        ki: KEYBDINPUT {
+          dwFlags: KEYEVENTF_KEYUP,
+          ..key
+        },
+      },
+    },
+  ];
+  let input_size = i32::try_from(std::mem::size_of::<INPUT>())?;
+
+  // SAFETY: Both inputs are initialized keyboard events, and the size
+  // matches `INPUT`. Send the pair together to avoid interleaving.
+  if unsafe { SendInput(&inputs, input_size) } != 2 {
+    return Err(crate::Error::Platform(
+      "Failed to send the Alt menu mask.".to_string(),
+    ));
+  }
+
+  Ok(())
 }
 
 /// A system-wide low-level keyboard hook.
@@ -195,6 +237,12 @@ impl KeyboardHook {
     });
 
     if should_intercept {
+      if is_keypress && input.flags.contains(LLKHF_ALTDOWN) {
+        if let Err(err) = mask_alt_menu() {
+          tracing::warn!("Failed to mask Alt menu activation: {err}");
+        }
+      }
+
       return LRESULT(1);
     }
 
