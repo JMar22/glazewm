@@ -213,6 +213,7 @@ pub enum InitialWindowState {
   #[default]
   Tiling,
   Floating,
+  Fullscreen,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]

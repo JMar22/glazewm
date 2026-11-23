@@ -25,6 +25,9 @@ impl WindowState {
       InitialWindowState::Floating => Self::Floating(
         config.window_behavior.state_defaults.floating.clone(),
       ),
+      InitialWindowState::Fullscreen => Self::Fullscreen(
+        config.window_behavior.state_defaults.fullscreen.clone(),
+      ),
     }
   }
 

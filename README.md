@@ -310,7 +310,8 @@ The `window_behavior` config option exists to customize the states that a window
 ```yaml
 window_behavior:
   # New windows are created in this state whenever possible.
-  # Allowed values: 'tiling', 'floating'.
+  # Allowed values: 'tiling', 'floating', 'fullscreen'.
+  # Fixed-size windows float by default.
   initial_state: "tiling"
 
   # Sets the default options for when a new window is created. This also
