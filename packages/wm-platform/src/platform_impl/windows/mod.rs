@@ -5,6 +5,7 @@ mod event_loop;
 mod keyboard_hook;
 mod mouse_listener;
 mod native_window;
+mod shutdown_order;
 mod single_instance;
 mod window_listener;
 
@@ -14,6 +15,7 @@ pub(crate) use event_loop::*;
 pub(crate) use keyboard_hook::*;
 pub(crate) use mouse_listener::*;
 pub(crate) use native_window::*;
+pub(crate) use shutdown_order::*;
 pub(crate) use single_instance::*;
 pub(crate) use window_listener::*;
 

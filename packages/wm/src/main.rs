@@ -110,6 +110,12 @@ async fn start_wm(
   // Ensure that only one instance of the WM is running.
   let _single_instance = SingleInstance::new()?;
 
+  // Be closed after the applications when the session ends, so that a
+  // sign-out the user cancels leaves the WM running.
+  if let Err(err) = wm_platform::shut_down_after_applications() {
+    tracing::warn!("Failed to set the WM's shutdown order: {err}");
+  }
+
   // Parse and validate user config.
   let mut config = UserConfig::new(config_path)?;
 

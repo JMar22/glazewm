@@ -13,6 +13,7 @@ mod native_window;
 mod num_cast;
 mod platform_event;
 mod platform_impl;
+mod shutdown_order;
 mod single_instance;
 mod thread_bound;
 mod window_listener;
@@ -30,6 +31,7 @@ pub use num_cast::*;
 pub use platform_event::*;
 #[cfg(target_os = "windows")]
 pub use platform_impl::com::uninitialize_com;
+pub use shutdown_order::*;
 pub use single_instance::*;
 pub use thread_bound::*;
 pub use window_listener::*;

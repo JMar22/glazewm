@@ -14,6 +14,14 @@ use wm_platform::{NativeWindow, NativeWindowWindowsExt, OpacityValue};
 async fn main() -> anyhow::Result<()> {
   tracing_subscriber::fmt().init();
 
+  // Be closed with the WM, after the applications, when the session ends.
+  // A sign-out the user cancels would otherwise leave the WM running
+  // without its watcher, and nothing to restore its windows if it then
+  // crashes.
+  if let Err(err) = wm_platform::shut_down_after_applications() {
+    tracing::warn!("Failed to set the watcher's shutdown order: {err}");
+  }
+
   let mut client = IpcClient::connect().await?;
 
   // Get handles to windows that are already open on watcher launch.
