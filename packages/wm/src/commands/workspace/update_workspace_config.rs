@@ -19,7 +19,7 @@ pub fn update_workspace_config(
   if let Some(new_name) = &new_config.name {
     if new_name != &current_config.name {
       if let Some(_other_workspace) = state.workspace_by_name(new_name) {
-        anyhow::bail!("The workspace \"{}\" already exists", new_name);
+        anyhow::bail!("The workspace \"{new_name}\" already exists");
       }
     }
   }

@@ -109,7 +109,7 @@ impl IpcServer {
                   ))?;
                 }
               }
-              Some(Err(err)) => bail!("WebSocket error: {}", err),
+              Some(Err(err)) => bail!("WebSocket error: {err}"),
               None => {
                 // WebSocket connection closed.
                 break Ok(());
@@ -158,9 +158,7 @@ impl IpcServer {
     // Respond to the client with the result of the command.
     response_tx
       .send(Self::to_client_response_msg(message, response_data)?)
-      .map_err(|err| {
-        anyhow::anyhow!("Failed to send response: {}", err)
-      })?;
+      .map_err(|err| anyhow::anyhow!("Failed to send response: {err}"))?;
 
     Ok(())
   }
@@ -404,7 +402,7 @@ impl IpcServer {
     self
       .event_tx
       .send((event_type, event))
-      .map_err(|err| anyhow::anyhow!("Failed to send event: {}", err))?;
+      .map_err(|err| anyhow::anyhow!("Failed to send event: {err}"))?;
 
     Ok(())
   }

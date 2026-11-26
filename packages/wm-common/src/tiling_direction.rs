@@ -66,7 +66,7 @@ impl FromStr for TilingDirection {
     match unparsed {
       "horizontal" => Ok(Self::Horizontal),
       "vertical" => Ok(Self::Vertical),
-      _ => bail!("Not a valid tiling direction: {}", unparsed),
+      _ => bail!("Not a valid tiling direction: {unparsed}"),
     }
   }
 }

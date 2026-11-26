@@ -52,7 +52,7 @@ impl FromStr for TrayMenuId {
       "toggle_window_animations" => Ok(Self::ToggleWindowAnimations),
       "run_on_startup" => Ok(Self::RunOnStartup),
       "exit" => Ok(Self::Exit),
-      _ => anyhow::bail!("Invalid tray menu event: {}", event),
+      _ => anyhow::bail!("Invalid tray menu event: {event}"),
     }
   }
 }
