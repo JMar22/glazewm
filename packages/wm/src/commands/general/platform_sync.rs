@@ -454,6 +454,40 @@ fn keeps_own_fullscreen_frame(window: &WindowContainer) -> bool {
     })
 }
 
+/// Gets whether a frame is on the monitor with the given bounds, judged
+/// by its center.
+///
+/// The center is what decides it for a maximized frame, which overshoots
+/// its monitor by the invisible resize border on every free side and so
+/// reaches into a neighbouring monitor.
+#[cfg(any(test, target_os = "windows"))]
+fn is_on_monitor(frame: &Rect, bounds: &Rect) -> bool {
+  bounds.contains_point(&frame.center_point())
+}
+
+/// Gets whether a window's frame is already on the monitor the WM holds
+/// it on.
+///
+/// A window held in a maximized fullscreen that passes this is left where
+/// Windows' own maximize puts it, over that monitor's working area. The
+/// WM's rect for it is the monitor's bounds grown by the cached resize
+/// border, so re-applying it is not the no-op it looks like: the frame
+/// snaps back, but some applications lay their content out against the
+/// rect they were sent. Measured on one such window, a child window
+/// drawing its content moved 5px left inside the maximized frame on every
+/// redraw, so once as its workspace was shown and again as it was hidden,
+/// until the window was restored and maximized again. The rect is still
+/// applied to a window that has to move to another monitor.
+#[cfg(target_os = "windows")]
+fn is_on_monitor_of(window: &WindowContainer) -> bool {
+  window.monitor().is_some_and(|monitor| {
+    is_on_monitor(
+      &window.native_properties().frame,
+      &monitor.native_properties().bounds,
+    )
+  })
+}
+
 /// Gets whether a window is on screen and drawn over its monitor's
 /// taskbar.
 ///
@@ -645,6 +679,10 @@ fn reposition_window(
             window.native().maximize()?;
           }
 
+          if is_on_monitor_of(window) {
+            swp_flags |= SWP_NOMOVE | SWP_NOSIZE;
+          }
+
           window.native().set_window_pos(z_order, &rect, swp_flags)?;
         }
         _ => {
@@ -827,7 +865,7 @@ mod tests {
   use wm_platform::Rect;
 
   use super::{
-    covers_taskbar, fills_monitor, redraw_sort_key,
+    covers_taskbar, fills_monitor, is_on_monitor, redraw_sort_key,
     should_sync_taskbar_visibility,
   };
 
@@ -1012,6 +1050,41 @@ mod tests {
       assert!(
         !fills_monitor(&elsewhere, &bounds),
         "frame on the neighbouring monitor of {bounds:?}",
+      );
+    }
+  }
+
+  #[test]
+  fn a_maximized_window_is_left_on_its_own_monitor() {
+    for (bounds, working_area) in monitors() {
+      assert!(
+        is_on_monitor(&maximized_frame(&working_area), &bounds),
+        "maximized frame on {bounds:?}",
+      );
+
+      // A restored frame on its way to being maximized there.
+      assert!(
+        is_on_monitor(&working_area.inset(200), &bounds),
+        "restored frame on {bounds:?}",
+      );
+    }
+  }
+
+  #[test]
+  fn a_maximized_window_on_another_monitor_is_moved() {
+    for (bounds, working_area) in monitors() {
+      // Maximized on the neighbouring monitor: its resize border reaches
+      // back over the shared edge, but its center does not.
+      let elsewhere = Rect::from_ltrb(
+        working_area.left + bounds.width(),
+        working_area.top,
+        working_area.right + bounds.width(),
+        working_area.bottom,
+      );
+
+      assert!(
+        !is_on_monitor(&maximized_frame(&elsewhere), &bounds),
+        "frame maximized beside {bounds:?}",
       );
     }
   }
